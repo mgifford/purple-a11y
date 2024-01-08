@@ -10,6 +10,16 @@ import csv
 import requests
 from urllib.parse import urljoin, urlparse, urlunparse
 from bs4 import BeautifulSoup
+from lxml import etree
+
+def is_valid_sitemap(xml_content):
+    try:
+        schema_url = "http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd"
+        schema = etree.XMLSchema(etree.XML(requests.get(schema_url).content))
+        root = etree.fromstring(xml_content)
+        return schema.validate(root)
+    except etree.XMLSchemaError:
+        return False
 
 def get_valid_domains(domains):
     valid_domains = set()
@@ -23,11 +33,11 @@ def get_valid_domains(domains):
                 # Step 2: Check for sitemap.xml
                 sitemap_url = urljoin(response.url, '/sitemap.xml')
                 sitemap_response = requests.get(sitemap_url, timeout=5)
-                if sitemap_response.status_code == 200:
+                if sitemap_response.status_code == 200 and is_valid_sitemap(sitemap_response.content):
                     valid_domains.add(sitemap_url)
                 else:
                     valid_domains.add(urlunparse(urlparse(response.url)._replace(path='', query='', fragment='')))
-                    failed_domains.add(domain)  # Add the main domain to failures if sitemap is not found
+                    failed_domains.add(domain)  # Add the main domain to failures if sitemap is not found or not valid
 
         except requests.RequestException as e:
             print(f"Error processing domain {domain}: {e}")
