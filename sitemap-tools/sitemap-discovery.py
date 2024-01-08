@@ -11,14 +11,21 @@ import requests
 from urllib.parse import urljoin, urlparse, urlunparse
 from bs4 import BeautifulSoup
 from lxml import etree
+import xml.etree.ElementTree as ET
+from urllib.request import urlopen
+from urllib.error import URLError
+from lxml import etree
 
 def is_valid_sitemap(xml_content):
     try:
         schema_url = "http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd"
-        schema = etree.XMLSchema(etree.XML(requests.get(schema_url).content))
-        root = etree.fromstring(xml_content)
-        return schema.validate(root)
-    except etree.XMLSchemaError:
+        schema_file = urlopen(schema_url)
+        schema_doc = etree.parse(schema_file)
+        xmlschema = etree.XMLSchema(schema_doc)
+        parser = etree.XMLParser(schema=xmlschema)
+        etree.fromstring(xml_content, parser)
+        return True
+    except (ET.ParseError, URLError, etree.XMLSyntaxError):
         return False
 
 def get_valid_domains(domains):
