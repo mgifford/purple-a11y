@@ -2,7 +2,7 @@
 # Find Score
 # 
 # Aggregate a list of purple hats axe scores by looking at the reports.csv files
-# Run in directory with output of the Purple A11y reports.
+# See run-both-scores.sh for more. 
 #
 
 import os
