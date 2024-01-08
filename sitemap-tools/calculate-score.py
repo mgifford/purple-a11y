@@ -1,6 +1,7 @@
 # 
 # Calculate Score
 # It is great to have a summary of the purple-hats findings, but it is more important to have a numerical score to build on.
+# See run-both-scores.sh for more.
 # 
 
 import csv
