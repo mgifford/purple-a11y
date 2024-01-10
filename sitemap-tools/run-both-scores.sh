@@ -12,4 +12,4 @@ python find-score.py
 python calculate-score.py
 
 # Display results
-cat *_result.csv
+# cat *_result.csv
