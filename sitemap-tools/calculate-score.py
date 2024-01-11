@@ -119,6 +119,7 @@ def process_and_append(axe_impact_file, number_urls_file, wcag_conformance_file,
 
             # Print cumulative counts
             print(f"Domain: {domain}")
+            print(f"{extract_date_from_filename(axe_impact_file)}")
             print(f"Number of URLs: {number_urls}")
             print(f"")
             # print(f"Critical: {data.get('critical', 0)}")
@@ -143,6 +144,23 @@ def process_and_append(axe_impact_file, number_urls_file, wcag_conformance_file,
             # print("")
     except Exception as e:
         print(f"Error processing files {axe_impact_file}, {number_urls_file}, and {wcag_conformance_file}: {e}")
+
+
+def extract_date_from_filename(axe_impact_file):
+    try:
+        # Extracting the 8-digit date from the filename
+        date_string = axe_impact_file.split('_')[3]
+
+        # Converting the date string to a datetime object
+        date_object = datetime.strptime(date_string, "%Y%m%d")
+
+        # Formatting the datetime object as a human-readable date
+        formatted_date = date_object.strftime("%B %d, %Y")
+
+        return formatted_date
+    except Exception as e:
+        print(f"Error extracting date from filename {axe_impact_file}: {e}")
+        return None
 
 
 def main():
