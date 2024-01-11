@@ -2,6 +2,7 @@ import csv
 import os
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
+from operator import itemgetter
 
 def calculate_score(data, number_urls):
     # Calculate the score based on your formula
@@ -66,7 +67,8 @@ def calculate_grade(score):
     
     return grade, message
 
-def process_and_append(axe_impact_file, number_urls_file, wcag_conformance_file, output_file, data):
+def process_and_append(axe_impact_file, number_urls_file, wcag_conformance_file, url_file, xpath_file, output_file, data):
+# def process_and_append(axe_impact_file, number_urls_file, wcag_conformance_file, output_file, data):
     try:
         # Extract domain and date from the axe impact file name
         base_name = os.path.splitext(os.path.basename(axe_impact_file))[0]
@@ -89,6 +91,14 @@ def process_and_append(axe_impact_file, number_urls_file, wcag_conformance_file,
             with open(number_urls_file, 'r', encoding='utf-8') as nu_file:
                 number_urls = int(nu_file.readline().strip())
 
+           # Read data from URL file
+            if os.path.exists(url_file):
+                process_url(url_file, data)
+
+            # Read data from XPath file
+            if os.path.exists(xpath_file):
+                process_xpath(xpath_file, data)
+
             # Update running total
             for key in axe_data:
                 data[key] = data.get(key, 0) + axe_data[key]
@@ -103,10 +113,10 @@ def process_and_append(axe_impact_file, number_urls_file, wcag_conformance_file,
                 writer = csv.writer(output)
                 writer.writerow(['domain', domain])
                 writer.writerow(['date', date])
-                writer.writerow(['critical', data.get('critical', 0)])
-                writer.writerow(['serious', data.get('serious', 0)])
-                writer.writerow(['moderate', data.get('moderate', 0)])
-                writer.writerow(['minor', data.get('minor', 0)])
+                # writer.writerow(['critical', data.get('critical', 0)])
+                # writer.writerow(['serious', data.get('serious', 0)])
+                # writer.writerow(['moderate', data.get('moderate', 0)])
+                # writer.writerow(['minor', data.get('minor', 0)])
                 writer.writerow(['number_urls', number_urls])
                 writer.writerow(['score', score_value])
                 writer.writerow(['grade', grade_value[0]])
@@ -122,22 +132,33 @@ def process_and_append(axe_impact_file, number_urls_file, wcag_conformance_file,
             print(f"{extract_date_from_filename(axe_impact_file)}")
             print(f"Number of URLs: {number_urls}")
             print(f"")
-            # print(f"Critical: {data.get('critical', 0)}")
-            # print(f"Serious: {data.get('serious', 0)}")
-            # print(f"Moderate: {data.get('moderate', 0)}")
-            # print(f"Minor: {data.get('minor', 0)}")
             print(f"score = (({data.get('critical', 0)} * 2) +  ({data.get('serious', 0)} * 1.5) + "
                   f"({data.get('moderate', 0)} * 1.25) +  ({data.get('minor', 0)} * 1)) /({number_urls} * 5) ")
             print(f"Score: {score_value}")
             print(f"Grade: {grade_value[0]}")
 
             # Print the content to the terminal
-            print("Content from wcag conformance file:")
+            print("\nSummary data\n")
             for key, value in data.items():
+                if key == 'urls':
+                    continue
+                elif key == 'xpaths':
+                    continue
                 print(f"{key}: {value}")
 
-            print(f"")
-            print(f"")
+            # Print URL content to the terminal
+            if 'urls' in data:
+                print("\nMost bugs in the URL:")
+                for url in data['urls']:
+                    print(f"{url[0]}: {url[1]}")
+
+            # Print XPath content to the terminal
+            if 'xpaths' in data:
+                print("\nMost bugs in the XPaths:")
+                for xpath in data['xpaths']:
+                    print(f"{xpath[0]}: {xpath[1]}")
+
+            print(f"\n{'=' * 40}\n\n")
 
         else:
             print(f"Error: Unexpected file naming pattern for {axe_impact_file}")
@@ -185,16 +206,26 @@ def main():
             axe_impact_file = os.path.join(input_directory, filename)
             number_urls_file = os.path.join(input_directory, filename.replace('_axeImpact.csv', '_number_urls.csv'))
             wcag_conformance_file = os.path.join(input_directory, filename.replace('_axeImpact.csv', '_wcagConformance.csv'))
+            url_file = os.path.join(input_directory, filename.replace('_axeImpact.csv', '_url.csv'))
+            xpath_file = os.path.join(input_directory, filename.replace('_axeImpact.csv', '_xpath.csv'))
             output_file = os.path.join(input_directory, filename.replace('_axeImpact.csv', '_result.csv'))
 
             # Initialize an empty dictionary for data (assuming it's initially empty)
             data = {}
 
-            process_and_append(axe_impact_file, number_urls_file, wcag_conformance_file, output_file, data)
+            process_and_append(axe_impact_file, number_urls_file, wcag_conformance_file, url_file, xpath_file, output_file, data)
 
             # Include processing for wcagConformance file
             if os.path.exists(wcag_conformance_file):
                 process_wcag_conformance(wcag_conformance_file, data)
+
+            # Include processing for URL file
+            if os.path.exists(url_file):
+                process_url(url_file, data)
+
+            # Include processing for XPath file
+            if os.path.exists(xpath_file):
+                process_xpath(xpath_file, data)
 
 
 def process_wcag_conformance(wcag_conformance_file, data):
@@ -218,6 +249,51 @@ def process_wcag_conformance(wcag_conformance_file, data):
     except Exception as e:
         print(f"Error processing wcag conformance file {wcag_conformance_file}: {e}")
 
+def process_url(url_file, data):
+    try:
+        with open(url_file, 'r', encoding='utf-8') as url_file:
+            url_reader = csv.reader(url_file)
+            data['urls'] = []
+
+            for row in url_reader:
+                if row:  # Check if the row is not empty
+                    if len(row) == 2:
+                        key, value = row[0], int(row[1])
+                        data['urls'].append((key, value))
+                    else:
+                        print(f"Invalid row format in {url_file}: {row}")
+
+            # Sort URLs by the second column (value) in descending order
+            data['urls'] = sorted(data['urls'], key=itemgetter(1), reverse=True)
+
+            # Keep only the top ten URLs
+            data['urls'] = data['urls'][:10]
+
+    except Exception as e:
+        print(f"Error processing URL file {url_file}: {e}")
+
+def process_xpath(xpath_file, data):
+    try:
+        with open(xpath_file, 'r', encoding='utf-8') as xpath_file:
+            xpath_reader = csv.reader(xpath_file)
+            data['xpaths'] = []
+
+            for row in xpath_reader:
+                if row:  # Check if the row is not empty
+                    if len(row) == 2:
+                        key, value = row[0], int(row[1])
+                        data['xpaths'].append((key, value))
+                    else:
+                        print(f"Invalid row format in {xpath_file}: {row}")
+
+            # Sort XPaths by the second column (value) in descending order
+            data['xpaths'] = sorted(data['xpaths'], key=itemgetter(1), reverse=True)
+
+            # Keep only the top ten XPaths
+            data['xpaths'] = data['xpaths'][:10]
+
+    except Exception as e:
+        print(f"Error processing XPath file {xpath_file}: {e}")
 
 if __name__ == "__main__":
     main()
