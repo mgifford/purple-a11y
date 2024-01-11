@@ -11,7 +11,7 @@ def calculate_score(data, number_urls):
              data.get('moderate', 0) * 1.5 +
              data.get('minor', 0)) / (number_urls * 5))
 
-    rounded_score = score.quantize(Decimal('0.00'), rounding=ROUND_HALF_UP)
+    rounded_score = score.quantize(Decimal('0.0000'), rounding=ROUND_HALF_UP)
     return float(rounded_score) if number_urls != 0 else 0
 
 def calculate_grade(score):
