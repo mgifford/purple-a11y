@@ -1,8 +1,9 @@
-const fs = require('fs');
-const csv = require('csv-parser');
-const path = require('path');
-const { promisify } = require('util');
-const readdir = promisify(fs.readdir);
+import fs from 'fs';
+import csv from 'csv-parser';
+import path from 'path';
+import { promisify } from 'util';
+import { readdir as readdirAsync } from 'fs/promises';
+
 
 const datetime = new Date().toISOString().slice(0, 10);
 
