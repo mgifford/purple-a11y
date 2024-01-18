@@ -132,4 +132,21 @@ async function saveCsvToFile(filename, data) {
         for (const row of data) {
             output.push(row.join(','));
         }
-        fs.writeFile(filename, output
+        fs.writeFile(filename, output.join('\n'), 'utf-8', (error) => {
+            if (error) {
+                reject(error);
+            } else {
+                resolve();
+            }
+        });
+    });
+}
+
+async function main() {
+    const directory = process.argv[2] || './';
+    const partialString = process.argv[3] || datetime;
+
+    await findAndParseReports(directory, partialString);
+}
+
+main();
