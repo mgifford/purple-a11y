@@ -1,14 +1,12 @@
+// Import necessary modules
 import fs from 'fs';
 import csv from 'csv-parser';
 import path from 'path';
-import { promisify } from 'util';
-import { readdir as readdirAsync } from 'fs/promises';
-
 
 const datetime = new Date().toISOString().slice(0, 10);
 
 async function findAndParseReports(directory, partialString) {
-    const subdirs = await readdir(directory);
+    const subdirs = await fs.promises.readdir(directory);
 
     for (const subdir of subdirs) {
         if (subdir.includes(partialString)) {
@@ -23,11 +21,11 @@ async function findAndParseReports(directory, partialString) {
 
                 for (const column in summary) {
                     const outputFilename = `${outputFilenameBase}_${column}.txt`;
-                    saveSummaryToFile(outputFilename, summary[column]);
+                    await saveSummaryToFile(outputFilename, summary[column]);
                 }
 
                 const outputFilenameUrls = `${outputFilenameBase}_number_urls.txt`;
-                saveUrlsToFile(outputFilenameUrls, uniqueUrls.size);
+                await saveUrlsToFile(outputFilenameUrls, uniqueUrls.size);
             }
         }
     }
@@ -143,6 +141,7 @@ async function saveCsvToFile(filename, data) {
     });
 }
 
+// Main function execution
 async function main() {
     const directory = process.argv[2] || './';
     const partialString = process.argv[3] || datetime;
@@ -150,4 +149,5 @@ async function main() {
     await findAndParseReports(directory, partialString);
 }
 
-main();
+main().catch(console.error);
+
