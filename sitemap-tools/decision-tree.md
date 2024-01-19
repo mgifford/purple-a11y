@@ -9,4 +9,6 @@ graph TD;
     DoYouNeedRandom-->RandomizeSitemap;
     IsThereASitemap-->IsItTooBig;
     IsThereASitemap-->RandomizeSitemap;
+    IsThereASitemap-->IsItTooBig;
+
 ```
