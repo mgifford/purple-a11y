@@ -1,3 +1,5 @@
+/* The script doesn't parse the URLs properly so there are quite a few missing URLs in the sitemap.  */
+
 import axios from 'axios';
 import csv from 'csv-parser';
 import fs from 'fs';
