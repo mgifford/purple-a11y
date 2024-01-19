@@ -6,11 +6,13 @@ graph TD;
     DoYouHavePageCounts-->GetListOfURLs;
     GetListOfURLs-->CreateASiteMap;
     IsThereASitemap-->CrawlWithPurpleA11y;
-    DoYouNeedRandom-->RandomizeSitemap;
     IsThereASitemap-->IsItTooBig;
     IsThereASitemap-->RandomizeSitemap;
     IsThereASitemap-->IsItTooBig;
     CreateASiteMap-->IsItTooBig;
     IsItTooBig-->RandomizeSitemap;
+    RandomizeSitemap-->CrawlWithPurpleA11y;
+    CrawlWithPurpleA11y-->AggregatePurpleA11yResults;
+    AggregatePurpleA11yResults-->CalculatePurpleA11yScore
 
 ```
