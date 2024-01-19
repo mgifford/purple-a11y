@@ -2,8 +2,8 @@
 
 ```mermaid
 graph TD;
-    A-->B;
-    A-->C;
-    B-->D;
-    C-->D;
+    IsThereASitemap-->B;
+    DoYouHavePageCounts-->B;
+    DoYouHaveACSV-->D;
+    DoYouNeedRandom-->D;
 ```
