@@ -5,7 +5,6 @@ graph TD;
     IsThereASitemap-->IsThereACSV;
     DoYouHavePageCounts-->GetListOfURLs;
     GetListOfURLs-->IsThereASitemap;
-    GetListOfURLs-->CreateASiteMap;
     IsThereACSV-->CreateASiteMap;
     IsThereASitemap-->CrawlWithPurpleA11y;
     IsThereASitemap-->IsItTooBig;
