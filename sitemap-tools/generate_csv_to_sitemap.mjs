@@ -1,5 +1,3 @@
-/* The script doesn't parse the URLs properly so there are quite a few missing URLs in the sitemap.  */
-
 import axios from 'axios';
 import csv from 'csv-parser';
 import fs from 'fs';
@@ -9,8 +7,19 @@ const checkedUrls = new Set();
 const failedUrls = [];
 let urlCheckCount = 0;
 
+// Regular expression to validate URLs
+const urlPattern = /^(https?:\/\/)?(www\.)?[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}([/?].*)?$/i;
+
 function preprocessUrl(url) {
     let fullUrl = url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`;
+    
+    // Check if the URL matches the format
+    if (!urlPattern.test(fullUrl)) {
+        console.error(`Invalid URL format: ${fullUrl}`);
+        failedUrls.push(fullUrl);
+        return null;
+    }
+
     const urlObj = new URL(fullUrl);
     if (!urlObj.hostname.startsWith('www.')) {
         urlObj.hostname = 'www.' + urlObj.hostname;
@@ -19,6 +28,7 @@ function preprocessUrl(url) {
     console.log(`Processed URL: ${fullUrl}`);
     return fullUrl;
 }
+
 
 async function verifyAndProcessUrl(url) {
     urlCheckCount++;
