@@ -9,7 +9,6 @@ graph TD;
     IsThereACSV-->CreateASiteMap;
     IsThereASitemap-->CrawlWithPurpleA11y;
     IsThereASitemap-->IsItTooBig;
-    IsThereASitemap-->RandomizeSitemap;
     CreateASiteMap-->IsItTooBig;
     IsItTooBig-->RandomizeSitemap;
     RandomizeSitemap-->CrawlWithPurpleA11y;
