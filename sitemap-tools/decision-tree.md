@@ -8,7 +8,6 @@ graph TD;
     IsThereASitemap-->CrawlWithPurpleA11y;
     IsThereASitemap-->IsItTooBig;
     IsThereASitemap-->RandomizeSitemap;
-    IsThereASitemap-->IsItTooBig;
     CreateASiteMap-->IsItTooBig;
     IsItTooBig-->RandomizeSitemap;
     RandomizeSitemap-->CrawlWithPurpleA11y;
