@@ -2,8 +2,12 @@
 
 ```mermaid
 graph TD;
-    {IsThereASitemap}-->[IsThereACSV];
-    DoYouHavePageCounts-->B;
-    IsThereACSV-->D;
-    DoYouNeedRandom-->D;
+    IsThereASitemap-->IsThereACSV;
+    DoYouHavePageCounts-->GetListOfURLs;
+    GetListOfURLs-->CreateASiteMap;
+    IsThereASitemap-->CrawlWithPurpleA11y;
+    IsThereASitemap-->GetListOfURLs;
+    DoYouNeedRandom-->RandomizeSitemap;
+    IsThereASitemap-->IsItTooBig;
+    IsThereASitemap-->RandomizeSitemap;
 ```
