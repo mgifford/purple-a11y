@@ -4,90 +4,62 @@ import fs from 'fs';
 import { Builder } from 'xml2js';
 
 const checkedUrls = new Set();
-const duplicateUrls = new Set();
 const failedUrls = [];
 let urlCheckCount = 0;
 
-function isValidHttpUrl(string) {
-    try {
-        new URL(string);
-    } catch (_) {
-        return false;
+function preprocessUrl(url) {
+    let fullUrl = url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`;
+    const urlObj = new URL(fullUrl);
+    if (!urlObj.hostname.startsWith('www.')) {
+        urlObj.hostname = 'www.' + urlObj.hostname;
     }
-    return true;
-}
-
-async function isUrlValid(url) {
-    try {
-        const response = await axios.head(url, { timeout: 10000, maxRedirects: 10 });
-        return response.status === 200;
-    } catch (error) {
-        if (error.response) {
-            console.error(`Error checking URL ${url}: Server responded with status code ${error.response.status}`);
-        } else if (error.request) {
-            console.error(`Error checking URL ${url}: No response received.`);
-        } else {
-            console.error(`Error checking URL ${url}: ${error.message}`);
-        }
-        failedUrls.push(url);
-        return false;
-    }
-}
-
-async function preprocessUrl(url) {
-    const fullUrl = url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`;
-    console.log(`Processing URL: ${fullUrl}`);
-
-    if (!isValidHttpUrl(fullUrl)) {
-        console.error(`Invalid URL format after processing: ${fullUrl}`);
-        failedUrls.push(fullUrl);
-        return null;
-    }
-
+    fullUrl = urlObj.toString();
+    console.log(`Processed URL: ${fullUrl}`);
     return fullUrl;
-}
-
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function verifyAndProcessUrl(url) {
     urlCheckCount++;
     console.log(`Checking URL ${urlCheckCount}: ${url}`);
 
-    await sleep(1000); // Delay of 1 second
-
     if (checkedUrls.has(url)) {
         console.log(`Duplicate URL skipped: ${url}`);
-        duplicateUrls.add(url);
         return null;
     }
 
     checkedUrls.add(url);
 
     try {
-        const response = await axios.get(url, { timeout: 10000, maxRedirects: 10 });
+        const response = await axios.get(url, {
+            timeout: 15000,
+            maxRedirects: 15,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'
+            }
+        });
+
+        const finalUrl = response.request.res ? response.request.res.responseUrl : response.request.responseURL;
+
         if (response.status === 200) {
-            const finalUrl = response.request.res.responseUrl || url;
-            console.log(`URL verified: ${finalUrl}`);
-            return finalUrl.endsWith('.pdf') || finalUrl.endsWith('.xml') ? null : finalUrl;
+            if (finalUrl && url !== finalUrl) {
+                console.log(`Redirected URL: Original: ${url}, Final: ${finalUrl}`);
+            } else {
+                console.log(`URL verified: ${url}`);
+            }
+            return finalUrl || url;
         }
     } catch (error) {
         if (error.response) {
-            // The request was made and the server responded with a status code
-            console.error(`Error checking URL ${url}: Server responded with status code ${error.response.status}`);
+            console.error(`Error checking URL ${url}: Server responded with status code ${error.response.status}, status text: ${error.response.statusText}`);
         } else if (error.request) {
-            // The request was made but no response was received
             console.error(`Error checking URL ${url}: No response received.`);
         } else {
-            // Something happened in setting up the request that triggered an Error
             console.error(`Error checking URL ${url}: ${error.message}`);
         }
         failedUrls.push(url);
     }
     return null;
 }
-
 
 function readCsv(csvFile) {
     return new Promise((resolve, reject) => {
@@ -97,7 +69,7 @@ function readCsv(csvFile) {
             .on('data', (row) => {
                 const url = Object.values(row)[0].trim();
                 if (url) {
-                    urls.push(url);
+                    urls.push(preprocessUrl(url));
                 } else {
                     console.error(`Invalid or empty URL found in CSV: ${JSON.stringify(row)}`);
                 }
@@ -135,8 +107,7 @@ async function main() {
 
     try {
         const urlsFromCsv = await readCsv(csvFile);
-        const preprocessedUrls = await Promise.all(urlsFromCsv.map(preprocessUrl));
-        const processedUrls = await Promise.all(preprocessedUrls.filter(url => url).map(verifyAndProcessUrl));
+        const processedUrls = await Promise.all(urlsFromCsv.filter(url => url).map(verifyAndProcessUrl));
         const validUrls = processedUrls.filter(url => url);
 
         if (validUrls.length === 0) {
@@ -146,9 +117,6 @@ async function main() {
 
         generateSitemap(validUrls, outputFile);
 
-        if (duplicateUrls.size > 0) {
-            console.log(`Duplicate URLs found: ${Array.from(duplicateUrls).join(', ')}`);
-        }
         if (failedUrls.length > 0) {
             console.log(`Failed URLs: ${failedUrls.join(', ')}`);
         }
