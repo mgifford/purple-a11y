@@ -10,5 +10,6 @@ graph TD;
     IsThereASitemap-->IsItTooBig;
     IsThereASitemap-->RandomizeSitemap;
     IsThereASitemap-->IsItTooBig;
+    CreateASiteMap-->IsItTooBig;
 
 ```
