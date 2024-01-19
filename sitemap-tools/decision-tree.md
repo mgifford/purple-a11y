@@ -2,8 +2,8 @@
 
 ```mermaid
 graph TD;
+    DoYouHavePageHitCounts-->GetListOfURLs;
     IsThereASitemap-->IsThereACSV;
-    DoYouHavePageCounts-->GetListOfURLs;
     GetListOfURLs-->IsThereASitemap;
     IsThereACSV-->CreateASiteMap;
     IsThereASitemap-->CrawlWithPurpleA11y;
@@ -12,6 +12,7 @@ graph TD;
     IsItTooBig-->RandomizeSitemap;
     RandomizeSitemap-->CrawlWithPurpleA11y;
     CrawlWithPurpleA11y-->AggregatePurpleA11yResults;
-    AggregatePurpleA11yResults-->CalculatePurpleA11yScore
-
+    AggregatePurpleA11yResults-->CalculatePurpleA11yScore;
+    CrawlWithPurpleA11y-->BringCSVIntoGoogleSheet;
+    DoYouHavePageHitCounts-->BringCSVIntoGoogleSheet;
 ```
