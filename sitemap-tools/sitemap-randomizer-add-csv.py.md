@@ -36,7 +36,3 @@ The Python module is designed to merge an existing XML sitemap with a set of new
 - It will then combine these URLs, avoiding duplicates, and create a new XML sitemap file.
 - The combined sitemap will be saved to the specified output file.
 - A confirmation message showing the output file path will be displayed in the console.
-
-### Conversion to Node.js
-
-To convert this script to Node.js, we'll use `xml2js` for XML parsing and Node.js's built-in modules for file and argument operations. If you'd like to proceed with the conversion to Node.js, please let me know, and I'll provide the Node.js version of this script.
