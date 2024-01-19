@@ -10,6 +10,7 @@ graph TD;
     IsThereASitemap-->IsItTooBig;
     CreateASiteMap-->IsItTooBig;
     IsItTooBig-->RandomizeSitemap;
+    CreateASiteMap-->CrawlWithPurpleA11y;
     RandomizeSitemap-->CrawlWithPurpleA11y;
     CrawlWithPurpleA11y-->AggregatePurpleA11yResults;
     AggregatePurpleA11yResults-->CalculatePurpleA11yScore;
