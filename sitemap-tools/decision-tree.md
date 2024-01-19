@@ -15,5 +15,7 @@ graph TD;
     AggregatePurpleA11yResults-->CalculatePurpleA11yScore;
     CrawlWithPurpleA11y-->BringCSVIntoGoogleSheet;
     DoYouHavePageHitCounts-->BringCSVIntoGoogleSheet;
+    BringCSVIntoGoogleSheet-->EvaluateErrorImpact;
     CalculatePurpleA11yScore-->CompareWithPreviousScans;
+    CompareWithPreviousScans-->SendTeamProgressReport;
 ```
