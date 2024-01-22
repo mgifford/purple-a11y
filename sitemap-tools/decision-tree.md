@@ -20,3 +20,10 @@ graph TD;
     CalculatePurpleA11yScore-->CompareWithPreviousScans;
     CompareWithPreviousScans-->SendTeamProgressReport;
 ```
+
+Create a list of domains with the following attributes:
+
+- Domain Name
+- CSV path
+- Sitemap path / URL
+- Monthly scan
