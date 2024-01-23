@@ -1,22 +1,17 @@
-# 
-# Find Score
-# 
-# Aggregate a list of purple hats axe scores by looking at the reports.csv files
-# See run-both-scores.sh for more. 
-#
-
 import os
 import csv
 from collections import defaultdict
 from datetime import datetime
 import argparse
+from urllib.parse import urlparse
 
-def find_and_parse_reports(directory, partial_string):
+def find_and_parse_reports(directory, partial_string, output_directory):
     for subdir in os.listdir(directory):
         if os.path.isdir(os.path.join(directory, subdir)) and partial_string in subdir:
             report_directory = os.path.join(directory, subdir, 'reports')
             if os.path.exists(report_directory):
                 domain = get_domain_from_csv(os.path.join(report_directory, 'report.csv'))
+                print(f"{domain}")
                 timestamp = subdir.split('_')[0]
                 output_filename_base = f"{domain}_{timestamp}"
 
@@ -30,12 +25,12 @@ def find_and_parse_reports(directory, partial_string):
 
                 # Save individual column summaries to text files
                 for column, values in summary.items():
-                    output_filename = f"{output_filename_base}_{column}.txt"
-                    save_summary_to_file(output_filename, values)
+                    output_filename = f"{output_filename_base}_{column}.csv"
+                    save_summary_to_file(output_filename, values, output_directory)
 
                 # Save the total number of unique URLs to a text file
-                output_filename_urls = f"{output_filename_base}_number_urls.txt"
-                save_urls_to_file(output_filename_urls, len(unique_urls))
+                output_filename_urls = f"{output_filename_base}_number_urls.csv"
+                save_urls_to_file(output_filename_urls, len(unique_urls), output_directory)
 
 def get_domain_from_csv(csv_file):
     with open(csv_file, 'r', encoding='utf-8') as file:
@@ -44,12 +39,17 @@ def get_domain_from_csv(csv_file):
         first_row = next(reader, None)
         if first_row:
             url = first_row[4]
+            print(f"{url}")
             return extract_domain(url)
     return "unknown_domain"
 
+
 def extract_domain(url):
     # Extract the domain name from the URL
-    return url.split('/')[2].replace('.', '_')
+    # return url.split('/')[2].replace('.', '_')
+    parsed_url = urlparse(url)
+    print(f"{parsed_url}")
+    return parsed_url.netloc.replace('.', '_')
 
 def get_unique_urls(csv_file):
     unique_urls = set()
@@ -67,29 +67,27 @@ def update_summary(summary, report_directory):
             for key, value in row.items():
                 summary[key][value] += 1
 
-
-def save_summary_to_file(output_filename, values):
-    csv_filename = output_filename.replace('.txt', '.csv')  # Change file extension to CSV
-    with open(csv_filename, 'w', encoding='utf-8', newline='') as output_file:
+def save_summary_to_file(output_filename, values, output_directory):
+    output_path = os.path.join(output_directory, output_filename)
+    with open(output_path, 'w', encoding='utf-8', newline='') as output_file:
         csv_writer = csv.writer(output_file)
-        # csv_writer.writerow(['Category', 'Count'])
         for key, value in values.items():
             csv_writer.writerow([key, value])
 
-def save_urls_to_file(output_filename, count):
-    csv_filename = output_filename.replace('.txt', '.csv')  # Change file extension to CSV
-    with open(csv_filename, 'w', encoding='utf-8', newline='') as output_file:
+def save_urls_to_file(output_filename, count, output_directory):
+    output_path = os.path.join(output_directory, output_filename)
+    with open(output_path, 'w', encoding='utf-8', newline='') as output_file:
         csv_writer = csv.writer(output_file)
-        # csv_writer.writerow(['Total Number of Unique URLs'])
         csv_writer.writerow([count])
 
 def main():
     parser = argparse.ArgumentParser(description='Find and parse reports.')
     parser.add_argument('-d', '--directory', default='./', help='Directory to scan (default: current directory)')
     parser.add_argument('-p', '--partial-string', default=datetime.today().strftime('%Y%m%d'), help='Partial string to search for (default: today\'s date)')
+    parser.add_argument('-o', '--output', default='./', help='Output directory for files (default: current directory)')
     args = parser.parse_args()
 
-    find_and_parse_reports(args.directory, args.partial_string)
+    find_and_parse_reports(args.directory, args.partial_string, args.output)
 
 if __name__ == "__main__":
     main()
