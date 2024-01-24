@@ -3,14 +3,13 @@ import os
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from operator import itemgetter
+import argparse
 
 def calculate_score(data, number_urls):
-    # Calculate the score based on your formula
     score = Decimal((data.get('critical', 0) * 3 +
-             data.get('serious', 0) * 2 +
-             data.get('moderate', 0) * 1.5 +
-             data.get('minor', 0)) / (number_urls * 5))
-
+                     data.get('serious', 0) * 2 +
+                     data.get('moderate', 0) * 1.5 +
+                     data.get('minor', 0)) / (number_urls * 5))
     rounded_score = score.quantize(Decimal('0.0000'), rounding=ROUND_HALF_UP)
     return float(rounded_score) if number_urls != 0 else 0
 
@@ -67,8 +66,14 @@ def calculate_grade(score):
     
     return grade, message
 
-def process_and_append(axe_impact_file, number_urls_file, wcag_conformance_file, url_file, xpath_file, output_file, data):
-# def process_and_append(axe_impact_file, number_urls_file, wcag_conformance_file, output_file, data):
+def process_and_append(axe_impact_file, number_urls_file, wcag_conformance_file, url_file, xpath_file, output_file, data, directory):
+    axe_impact_path = os.path.join(directory, axe_impact_file)
+    number_urls_path = os.path.join(directory, number_urls_file)
+    wcag_conformance_path = os.path.join(directory, wcag_conformance_file)
+    url_path = os.path.join(directory, url_file)
+    xpath_path = os.path.join(directory, xpath_file)
+    output_path = os.path.join(directory, output_file)
+
     try:
         # Extract domain and date from the axe impact file name
         base_name = os.path.splitext(os.path.basename(axe_impact_file))[0]
@@ -163,6 +168,7 @@ def process_and_append(axe_impact_file, number_urls_file, wcag_conformance_file,
         else:
             print(f"Error: Unexpected file naming pattern for {axe_impact_file}")
             # print("")
+
     except Exception as e:
         print(f"Error processing files {axe_impact_file}, {number_urls_file}, and {wcag_conformance_file}: {e}")
 
@@ -183,49 +189,6 @@ def extract_date_from_filename(axe_impact_file):
         print(f"Error extracting date from filename {axe_impact_file}: {e}")
         return None
 
-
-def main():
-    input_directory = "./"  # Replace with the path to your directory
-
-    cumulative_data = {}
-
-    print(f"Purple A11y Accessibility Summaries")
-    print(f"")
-    print(f"((Critical * 3 + Serious * 2 + Moderate * 1.5 + Minor * 1) / URLs * 5 * 100) / 100")
-
-    # Get today's date
-    today_date = datetime.now().date()
-
-    # Print the date in a formatted string
-    print(f"Script run: {today_date}")
-    print(f"Directory: {input_directory}")
-    print(f"")
-
-    for filename in os.listdir(input_directory):
-        if filename.endswith("_axeImpact.csv"):
-            axe_impact_file = os.path.join(input_directory, filename)
-            number_urls_file = os.path.join(input_directory, filename.replace('_axeImpact.csv', '_number_urls.csv'))
-            wcag_conformance_file = os.path.join(input_directory, filename.replace('_axeImpact.csv', '_wcagConformance.csv'))
-            url_file = os.path.join(input_directory, filename.replace('_axeImpact.csv', '_url.csv'))
-            xpath_file = os.path.join(input_directory, filename.replace('_axeImpact.csv', '_xpath.csv'))
-            output_file = os.path.join(input_directory, filename.replace('_axeImpact.csv', '_result.csv'))
-
-            # Initialize an empty dictionary for data (assuming it's initially empty)
-            data = {}
-
-            process_and_append(axe_impact_file, number_urls_file, wcag_conformance_file, url_file, xpath_file, output_file, data)
-
-            # Include processing for wcagConformance file
-            if os.path.exists(wcag_conformance_file):
-                process_wcag_conformance(wcag_conformance_file, data)
-
-            # Include processing for URL file
-            if os.path.exists(url_file):
-                process_url(url_file, data)
-
-            # Include processing for XPath file
-            if os.path.exists(xpath_file):
-                process_xpath(xpath_file, data)
 
 
 def process_wcag_conformance(wcag_conformance_file, data):
@@ -294,6 +257,48 @@ def process_xpath(xpath_file, data):
 
     except Exception as e:
         print(f"Error processing XPath file {xpath_file}: {e}")
+
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Find and parse reports.')
+    parser.add_argument('-d', '--directory', default='./', help='Directory to scan (default: current directory)')
+    args = parser.parse_args()
+
+    cumulative_data = {}
+
+    print(f"Purple A11y Accessibility Summaries")
+    print(f"((Critical * 3 + Serious * 2 + Moderate * 1.5 + Minor * 1) / URLs * 5 * 100) / 100")
+    today_date = datetime.now().date()
+    print(f"Script run: {today_date}")
+    print(f"Directory: {args.directory}")
+    print(f"")
+
+    for filename in os.listdir(args.directory):
+        if filename.endswith("_axeImpact.csv"):
+            axe_impact_file = os.path.join(args.directory, filename)
+            number_urls_file = os.path.join(args.directory, filename.replace('_axeImpact.csv', '_number_urls.csv'))
+            wcag_conformance_file = os.path.join(args.directory, filename.replace('_axeImpact.csv', '_wcagConformance.csv'))
+            url_file = os.path.join(args.directory, filename.replace('_axeImpact.csv', '_url.csv'))
+            xpath_file = os.path.join(args.directory, filename.replace('_axeImpact.csv', '_xpath.csv'))
+            output_file = os.path.join(args.directory, filename.replace('_axeImpact.csv', '_result.csv'))
+
+            data = {}
+
+            process_and_append(axe_impact_file, number_urls_file, wcag_conformance_file, url_file, xpath_file, output_file, data, args.directory)
+
+            # Include processing for wcagConformance file
+            if os.path.exists(wcag_conformance_file):
+                process_wcag_conformance(wcag_conformance_file, data)
+
+            # Include processing for URL file
+            if os.path.exists(url_file):
+                process_url(url_file, data)
+
+            # Include processing for XPath file
+            if os.path.exists(xpath_file):
+                process_xpath(xpath_file, data)
+
 
 if __name__ == "__main__":
     main()
