@@ -8,7 +8,7 @@
 import requests
 import random
 import argparse
-import os  
+import os
 from urllib.parse import urlparse
 from lxml import etree
 from io import BytesIO
@@ -74,31 +74,19 @@ def main():
     parser.add_argument('-e', '--exclude', nargs='+', default=[], help='Strings to exclude from URLs.')
     parser.add_argument('-i', '--include', nargs='+', default=[], help='Strings to force inclusion from URLs.')
     parser.add_argument('-f', '--format', choices=['xml', 'csv'], default='xml', help='Output format (default: xml).')
+    parser.add_argument('-o', '--output', required=True, help='Output filename with path.')
 
     args = parser.parse_args()
 
     urls = get_sitemap_urls(args.url)
     filtered_urls = filter_and_randomize_urls(urls, args.exclude, args.include)[:args.number]
 
-    timestamp = datetime.now().strftime('%d%b%Y')
-
-    # Extract domain name from the URL
-    domain_name = urlparse(args.url).hostname
-
-    # Create subdirectories if they don't exist
-    xml_output_dir = 'sitemap'  # Added subdirectory for XML output
-    csv_output_dir = 'csv'  # Added subdirectory for CSV output
-    os.makedirs(xml_output_dir, exist_ok=True)
-    os.makedirs(csv_output_dir, exist_ok=True)
-
-    inclusion_info = '-'.join(['i'] + [inc.replace('/', '_') for inc in args.include]) if args.include else ''
-    exclusion_info = '-'.join(['e'] + [exc.replace('/', '_') for exc in args.exclude]) if args.exclude else ''
+    # Use the specified output filename
+    output_filename = args.output
 
     if args.format == 'xml':
-        output_filename = f'{xml_output_dir}/{domain_name}-{timestamp}{inclusion_info}{exclusion_info}.{args.format}'
         save_urls_to_xml(filtered_urls, output_filename)
     elif args.format == 'csv':
-        output_filename = f'{csv_output_dir}/{domain_name}-{timestamp}{inclusion_info}{exclusion_info}.{args.format}'
         save_urls_to_csv(filtered_urls, output_filename)
 
     print(f"Output saved to {output_filename}")
