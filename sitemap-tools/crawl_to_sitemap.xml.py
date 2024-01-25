@@ -43,7 +43,7 @@ def crawl_website(start_url):
             visited_urls.add(current_url)
 
             # print(f"New URL found: {current_url}")  # Echo new URL to terminal
-            
+
             found_links = get_links(current_url, domain)
             new_links = found_links - all_links
             for link in new_links:
@@ -56,24 +56,38 @@ def crawl_website(start_url):
     return all_links
 
 def create_sitemap(urls, output_file):
-    urlset = ET.Element("urlset", xmlns="http://www.sitemaps.org/schemas/sitemap/0.9")
+    lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
     for url in urls:
-        if not url.endswith(('.pdf', '.xml')):
-            url_element = ET.SubElement(urlset, "url")
-            ET.SubElement(url_element, "loc").text = url
+        if not url.endswith(('.pdf', '.xml', '.txt', '.json', '.doc', '.docx')):
+            lines.append(f'    <url><loc>{url}</loc></url>')
 
-    tree = ET.ElementTree(urlset)
-    tree.write(output_file, encoding='utf-8', xml_declaration=True, method="xml")
+    lines.append('</urlset>')
+
+    formatted_xml = '\n'.join(lines)
+    with open(output_file, 'w', encoding='utf-8') as file:
+        file.write(formatted_xml)
+
+def format_xml(xml_content):
+    """Formats the XML string with proper indentation and line breaks."""
+    lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+    for line in xml_content.splitlines():
+        if line.strip().startswith('<url>'):
+            lines.append('  ' + line.strip())
+        elif line.strip().startswith('<loc>'):
+            lines.append('    ' + line.strip())
+        elif line.strip().startswith('</url>'):
+            lines.append('  ' + line.strip())
+    lines.append('</urlset>')
+    return '\n'.join(lines)
 
 def main(domain):
-    parsed_domain = urlparse(domain)
-    domain_name = parsed_domain.netloc if parsed_domain.scheme else domain
+    domain_name = domain if urlparse(domain).scheme else f"http://{domain}"
     today_date = datetime.now().strftime('%Y%m%d')
-    output_file = f"{domain_name}_sitemap_{today_date}.xml"
-    start_url = f"http://{domain_name}/"
-    urls = crawl_website(start_url)
+    output_file = f"{domain}_sitemap_{today_date}.xml"
+    urls = crawl_website(domain_name)
     create_sitemap(urls, output_file)
-    print(f"Sitemap for {domain_name} created as {output_file}")
+    print(f"Sitemap for {domain} created as {output_file}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Crawl a website and create a sitemap.')
