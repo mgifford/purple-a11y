@@ -1,84 +1,82 @@
-#!/bin/bash
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.robotparser import RobotFileParser
+import xml.etree.ElementTree as ET
+import argparse
+from datetime import datetime
 
-# Default CSV file
-csv_file="domains.csv"
+def can_fetch(url, user_agent='*'):
+    parsed_url = urlparse(url)
+    robots_url = f"{parsed_url.scheme}://{parsed_url.netloc}/robots.txt"
+    rp = RobotFileParser()
+    rp.set_url(robots_url)
+    rp.read()
+    return rp.can_fetch(user_agent, url)
 
-# Directory to save the results
-sitemap_directory="sitemap"
+def get_links(url, domain):
+    page_links = set()
+    try:
+        response = requests.get(url, timeout=5)
+        soup = BeautifulSoup(response.content, "html.parser")
+        for link in soup.find_all("a", href=True):
+            href = urljoin(url, link['href'])
+            if urlparse(href).netloc == domain:
+                page_links.add(normalize_url(href))
+    except requests.RequestException:
+        pass
+    return page_links
 
-# Parse command-line arguments
-while getopts ":f:" opt; do
-  case ${opt} in
-    f ) csv_file=$OPTARG ;;
-    \? )
-      echo "Usage: $0 [-f CSV_FILE]"
-      exit 1
-      ;;
-  esac
-done
+def normalize_url(url):
+    parsed_url = urlparse(url)
+    return urlunparse((parsed_url.scheme, parsed_url.netloc, parsed_url.path, '', '', ''))
 
-# Create the output directory if it doesn't exist
-mkdir -p "$sitemap_directory"
+def crawl_website(start_url):
+    domain = urlparse(start_url).netloc
+    visited_urls = set()
+    urls_to_visit = {start_url}
+    all_links = set()
 
-# Loop through each line in the CSV file
-while IFS=, read -r domain_url include_command required_csv; do
-    # Skip blank lines or lines starting with #
-    if [[ -z "$domain_url" || "$domain_url" == \#* ]]; then
-        continue
-    fi
+    while urls_to_visit:
+        current_url = urls_to_visit.pop()
+        if current_url not in visited_urls and can_fetch(current_url):
+            visited_urls.add(current_url)
 
-    # Trim leading and trailing whitespaces and carriage returns
-    domain_url=$(echo "$domain_url" | tr -d '\r' | awk '{$1=$1};1')
-    include_command=$(echo "$include_command" | awk '{$1=$1};1')
-    required_csv=$(echo "$required_csv" | awk '{$1=$1};1')
+            # print(f"New URL found: {current_url}")  # Echo new URL to terminal
+            
+            found_links = get_links(current_url, domain)
+            new_links = found_links - all_links
+            for link in new_links:
+                print(f"Adding new link to sitemap: {link}")  # Echo new link to terminal
+            all_links.update(new_links)
+            urls_to_visit.update(new_links - visited_urls)
+        else:
+            print(f"Duplicate or inaccessible URL skipped: {current_url}")  # Echo duplicate URL to terminal
 
-    # Extract the domain name from the URL
-    domain_name=$(echo "$domain_url" | awk -F/ '{print $3}') # Extract domain from URL
+    return all_links
 
-    # Sanitize the filename to remove any special characters
-    formatted_include_command=$(echo "$include_command" | tr '/' '-' | tr -d '[:space:]')
-    formatted_include_command=$(echo "$formatted_include_command" | sed 's/[^a-zA-Z0-9_-]//g')
+def create_sitemap(urls, output_file):
+    urlset = ET.Element("urlset", xmlns="http://www.sitemaps.org/schemas/sitemap/0.9")
+    for url in urls:
+        if not url.endswith(('.pdf', '.xml')):
+            url_element = ET.SubElement(urlset, "url")
+            ET.SubElement(url_element, "loc").text = url
 
-    # Check for valid URL scheme
-    if [[ ! "$domain_url" =~ ^https?:// ]]; then
-        echo "Invalid URL (missing http/https scheme): $domain_url"
-        continue
-    fi
+    tree = ET.ElementTree(urlset)
+    tree.write(output_file, encoding='utf-8', xml_declaration=True, method="xml")
 
-    # Format the filename
-    today_date=$(date +%d%b%Y)
-    domain_name=$(echo "$domain_url" | awk -F[/:] '{print $4}') # Extract domain name
-    filename="${domain_name}-${today_date}"
+def main(domain):
+    parsed_domain = urlparse(domain)
+    domain_name = parsed_domain.netloc if parsed_domain.scheme else domain
+    today_date = datetime.now().strftime('%Y%m%d')
+    output_file = f"{domain_name}_sitemap_{today_date}.xml"
+    start_url = f"http://{domain_name}/"
+    urls = crawl_website(start_url)
+    create_sitemap(urls, output_file)
+    print(f"Sitemap for {domain_name} created as {output_file}")
 
-    if [ -n "$formatted_include_command" ]; then
-        filename+="-${formatted_include_command}"
-    fi
-    if [ -n "$required_csv" ]; then
-        required_csv_basename=$(basename "$required_csv" .csv)
-        filename+="-required-${required_csv_basename}"
-    fi
-    filename+=".xml"
-
-    # Run sitemap-randomizer.py
-    python sitemap-randomizer.py -u "$domain_url" -n 2000 -f xml -i "$include_command" -o "$sitemap_directory/$filename"
-
-    if [ $? -ne 0 ]; then
-        # If sitemap-randomizer.py fails, run crawl_to_sitemap.xml.py
-        echo "Error encountered in sitemap-randomizer.py, attempting to crawl site with crawl_to_sitemap.xml.py"
-        python crawl_to_sitemap.xml.py -d "$domain_name"
-    fi
-
-    # Execute required files
-    if [ -n "$required_csv" ]; then
-        required_filename="required-${filename}"
-        python sitemap-randomizer-add-csv.py -x "$sitemap_directory/$filename" -c "$required_csv" -o "$sitemap_directory/$required_filename"
-        echo "Additional processing with $required_csv completed for $required_filename"
-    fi
-
-    # Show roughly how many URLs are in the scan
-    wc 1 "$sitemap_directory/$required_filename"
-
-done < "$csv_file"
-
-
-
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Crawl a website and create a sitemap.')
+    parser.add_argument('-d', '--domain', required=True, help='Domain to crawl and create a sitemap for.')
+    args = parser.parse_args()
+    main(args.domain)
