@@ -5,6 +5,8 @@
 # Also sitemap-randomizer.py to consolidate the sitemap.xml files
 #
 
+#!/bin/bash
+
 # Default CSV file
 csv_file="domains.csv"
 
@@ -64,8 +66,14 @@ while IFS=, read -r domain_url include_command required_csv; do
     fi
     filename+=".xml"
 
-    # Run the Python script with include command (-f csv)
+    # Run sitemap-randomizer.py
     python sitemap-randomizer.py -u "$domain_url" -n 2000 -f xml -i "$include_command" -o "$sitemap_directory/$filename"
+
+    if [ $? -ne 0 ]; then
+        # If sitemap-randomizer.py fails, run crawl_to_sitemap.xml.py
+        echo "Error encountered in sitemap-randomizer.py, attempting to crawl site with crawl_to_sitemap.xml.py"
+        python crawl_to_sitemap.xml.py -d "$domain_name"
+    fi
 
     # Execute required files
     if [ -n "$required_csv" ]; then
@@ -78,3 +86,4 @@ while IFS=, read -r domain_url include_command required_csv; do
     wc 1 "$sitemap_directory/$required_filename"
 
 done < "$csv_file"
+
