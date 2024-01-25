@@ -75,7 +75,6 @@ while IFS=, read -r domain_url include_command required_csv; do
     fi
 
     # Show roughly how many URLs are in the scan
-    ls "$sitemap_directory/$required_filename"
     wc 1 "$sitemap_directory/$required_filename"
 
 done < "$csv_file"
