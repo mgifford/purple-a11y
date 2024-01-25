@@ -27,21 +27,3 @@ Key functionalities of the script include:
      python script_name.py -s http://example.com -o sitemap.xml
      ```
    - Replace `http://example.com` with the URL of the site you want to crawl and `sitemap.xml` with your desired output file name.
-
-### Conversion to Node.js
-
-To convert this script to Node.js, we'll use similar libraries available in the Node.js ecosystem. We'll address the ES Module syntax to avoid the issues encountered previously.
-
-Here's a high-level structure of how the script can be translated into Node.js:
-
-1. **Libraries**: Use `axios` for HTTP requests, `cheerio` for parsing HTML (similar to BeautifulSoup), and Node.js's built-in modules for other functionalities.
-
-2. **Crawling Logic**: Replicate the crawling logic using JavaScript's async-await pattern.
-
-3. **Sitemap Generation**: Use Node.js's `xml2js` or similar library to generate the XML sitemap.
-
-4. **Command-Line Interface**: Utilize `process.argv` or a library like `yargs` to handle command-line arguments.
-
-5. **File Operations**: Use Node.js's `fs` module to handle file writing.
-
-Given the complexity of the script and the need to ensure correct asynchronous handling and error management in Node.js, the script will be quite extensive and require thorough testing to ensure it mirrors the Python script's functionality accurately. 
