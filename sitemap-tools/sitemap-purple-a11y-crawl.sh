@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Default directory containing .xml files
-sitemap_dir="/Users/mgifford/CA-Sitemap-Scans/sitemap/"
+sitemap_dir="./sitemaps/"
 today_date=$(date +"%d%b%Y") # Adjusted date format
 filter=""
 
