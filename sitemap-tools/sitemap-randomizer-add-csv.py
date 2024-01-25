@@ -1,5 +1,6 @@
 import argparse
 from xml.etree import ElementTree as ET
+import xml.dom.minidom
 
 def read_xml(xml_file):
     tree = ET.parse(xml_file)
@@ -8,23 +9,28 @@ def read_xml(xml_file):
 
 def read_csv(csv_file):
     with open(csv_file, 'r', encoding='utf-8') as file:
-        # Split URLs by lines and remove leading/trailing whitespaces
         return [line.strip() for line in file.read().splitlines()]
-
 
 def append_urls_to_sitemap(xml_root, new_urls):
     for new_url in new_urls:
         if new_url not in [loc.text for loc in xml_root.findall(".//{http://www.sitemaps.org/schemas/sitemap/0.9}loc")]:
-            url_element = ET.Element("{http://www.sitemaps.org/schemas/sitemap/0.9}url")
-            loc_element = ET.SubElement(url_element, "{http://www.sitemaps.org/schemas/sitemap/0.9}loc")
-            loc_element.text = f"{new_url}\n"  # Append a newline character to the URL
-            xml_root.append(url_element)
-
+            url_element = ET.SubElement(xml_root, "url")
+            loc_element = ET.SubElement(url_element, "loc")
+            loc_element.text = new_url
 
 def write_sitemap(output_file, xml_root):
     tree = ET.ElementTree(xml_root)
-    tree.write(output_file, encoding='utf-8', xml_declaration=True, method="xml")
 
+    # Convert the ElementTree to a string and then parse it with minidom for pretty printing
+    xml_string = ET.tostring(tree.getroot(), encoding='unicode')
+    dom = xml.dom.minidom.parseString(xml_string)
+
+    # Get the pretty printed string with proper indentation and line breaks
+    pretty_xml_as_string = dom.toprettyxml(indent="    ")
+
+    # Write the pretty printed XML to the file
+    with open(output_file, 'w', encoding='utf-8') as file:
+        file.write(pretty_xml_as_string)
 
 def combine_xml_csv(xml_sitemap, new_csv, output_file):
     xml_root = read_xml(xml_sitemap)
