@@ -71,7 +71,11 @@ while IFS=, read -r domain_url include_command required_csv; do
     if [ -n "$required_csv" ]; then
         required_filename="required-${filename}"
         python sitemap-randomizer-add-csv.py -x "$sitemap_directory/$filename" -c "$required_csv" -o "$sitemap_directory/$required_filename"
-        wc 1 "$sitemap_directory/$required_filename"
         echo "Additional processing with $required_csv completed for $required_filename"
     fi
+
+    # Show roughly how many URLs are in the scan
+    ls "$sitemap_directory/$required_filename"
+    wc 1 "$sitemap_directory/$required_filename"
+
 done < "$csv_file"
