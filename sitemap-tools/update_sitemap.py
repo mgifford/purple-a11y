@@ -14,6 +14,8 @@ def get_final_url_and_mime_type(url):
         print(f"Error accessing {url}: {e}")
         return url, None, None
 
+
+
 def update_sitemap(sitemap_file):
     tree = ET.parse(sitemap_file)
     root = tree.getroot()
@@ -27,19 +29,16 @@ def update_sitemap(sitemap_file):
         original_url = loc_element.text
         original_url_count += 1
 
-        if original_url in unique_urls:
+        final_url, mime_type, status_code = get_final_url_and_mime_type(original_url)
+
+        if original_url in unique_urls or mime_type is None or 'text/html' not in mime_type or status_code != 200:
             root.remove(url_element)
             changes_made = True
             continue
 
-        final_url, mime_type, status_code = get_final_url_and_mime_type(original_url)
+        print(f"Adding {final_url}")
         unique_urls.add(final_url)
-
-        if final_url != original_url or 'text/html' not in mime_type or status_code != 200:
-            root.remove(url_element)
-            changes_made = True
-        else:
-            updated_url_count += 1
+        updated_url_count += 1
 
     if changes_made:
         # Backup the original file
