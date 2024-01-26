@@ -14,8 +14,6 @@ def get_final_url_and_mime_type(url):
         print(f"Error accessing {url}: {e}")
         return url, None, None
 
-
-
 def update_sitemap(sitemap_file):
     tree = ET.parse(sitemap_file)
     root = tree.getroot()
