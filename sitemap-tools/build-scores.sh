@@ -1,4 +1,4 @@
-# Store in the ./purple-a11y/results directory with the data from Purple A11y
+# Store in the ./purple-a11y/results directory with the data from Purple A11y 
 
 #!/bin/bash
 
@@ -12,4 +12,4 @@ python find-score.py -p $DATE_TODAY -o summary
 python calculate-score.py -d summary 
 
 # Aggregate the calcualated scores
-python aggregate_scores.py -d summary%     
+python aggregate_scores.py -d summary
