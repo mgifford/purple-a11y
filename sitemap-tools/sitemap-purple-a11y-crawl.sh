@@ -28,6 +28,7 @@ while getopts ":das:c" opt; do
     esac
 done
 
+
 # Iterate over each .xml file in the directory based on the filter
 for file in "$sitemap_dir"*"$filter"*.xml; do
     # Check if the file is a regular file
@@ -38,28 +39,43 @@ for file in "$sitemap_dir"*"$filter"*.xml; do
             python ../update_sitemap.py -x "$file"
         fi
         echo "Processing $file..."
+
         # Run node script and save output to temp file
         node cli.js -c 1 -k MikeGifford:mike.gifford@civicactions.com -p 2000 -u "file://$file" > "$temp_file"
 
+        # Variable to check if "No pages were scanned." message is found
+        no_pages_scanned=0
+
         cat "$temp_file"
         
-        # Extract directory paths from temp file
+        # Extract directory paths from temp file and check for "No pages were scanned."
         while read -r line; do
+            if [[ $line == *"No pages were scanned"* ]]; then
+                no_pages_scanned=1
+            fi
+
             if [[ $line == *"Results directory is at"* ]]; then
-                # Extract and process directory path
                 directory=$(echo $line | awk '{print $6}')
                 echo "Found directory: $directory"
+
                 # Process the directory as needed
                 # e.g., check for report.csv file
                 report_file="$directory/reports/report.csv"
                 if [ -f "$report_file" ]; then
                     echo "Found report file: $report_file"
+
                     # Further processing here
                 else
                     echo "Report file not found: $report_file"
                 fi
             fi
         done < "$temp_file"
+
+        # Delete the directory if "No pages were scanned." was found
+        if [ "$no_pages_scanned" -eq 1 ]; then
+            echo "No pages were scanned in $directory. Deleting directory..."
+            rm -rf "$directory"
+        fi
     fi
 done
 
