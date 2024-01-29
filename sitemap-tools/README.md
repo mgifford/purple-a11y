@@ -10,3 +10,7 @@ This is an attempt to help aggregate greater number of reports, and provide a gr
 Following the general approach of [WCAG-EM](https://www.w3.org/WAI/test-evaluate/conformance/wcag-em/) it is good to assume that there are key pages that you want to have sampled for a site (home page, search page, accessibility statement, contact us form, key landing pages, unique content types, etc.), but aside from that you just want statistically relevant random sampling of pages.
 
 This script scans a sitemap for a site and returns a single sitemap.xml file that is a random set of the URLs.
+
+## Also see the Score Tools
+
+There are other tools available to aggregate and calculate the score from Purple A11y which are in the ../score-tools/ directory. 
