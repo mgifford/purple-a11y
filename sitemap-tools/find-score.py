@@ -5,51 +5,19 @@ from datetime import datetime
 import argparse
 from urllib.parse import urlparse
 
-def find_and_parse_reports(directory, partial_string, output_directory):
-    for subdir in os.listdir(directory):
-        if os.path.isdir(os.path.join(directory, subdir)) and partial_string in subdir:
-            report_directory = os.path.join(directory, subdir, 'reports')
-            if os.path.exists(report_directory):
-                domain = get_domain_from_csv(os.path.join(report_directory, 'report.csv'))
-                print(f"{domain}")
-                timestamp = subdir.split('_')[0]
-                output_filename_base = f"{domain}_{timestamp}"
-
-                # Process the report and update the summary
-                summary = defaultdict(lambda: defaultdict(int))
-                unique_urls = set()
-                update_summary(summary, report_directory)
-
-                # Process unique URLs
-                unique_urls.update(get_unique_urls(os.path.join(report_directory, 'report.csv')))
-
-                # Save individual column summaries to text files
-                for column, values in summary.items():
-                    output_filename = f"{output_filename_base}_{column}.csv"
-                    save_summary_to_file(output_filename, values, output_directory)
-
-                # Save the total number of unique URLs to a text file
-                output_filename_urls = f"{output_filename_base}_number_urls.csv"
-                save_urls_to_file(output_filename_urls, len(unique_urls), output_directory)
-
 def get_domain_from_csv(csv_file):
+    if not os.path.exists(csv_file):
+        print(f"File not found: {csv_file}")
+        return "unknown_domain"
+
     with open(csv_file, 'r', encoding='utf-8') as file:
         reader = csv.reader(file)
         next(reader)  # Skip header row
         first_row = next(reader, None)
         if first_row:
             url = first_row[4]
-            print(f"{url}")
-            return extract_domain(url)
-    return "unknown_domain"
-
-
-def extract_domain(url):
-    # Extract the domain name from the URL
-    # return url.split('/')[2].replace('.', '_')
-    parsed_url = urlparse(url)
-    print(f"{parsed_url}")
-    return parsed_url.netloc.replace('.', '_')
+            parsed_url = urlparse(url)
+            return parsed_url.netloc.replace('.', '_')
 
 def get_unique_urls(csv_file):
     unique_urls = set()
@@ -79,6 +47,38 @@ def save_urls_to_file(output_filename, count, output_directory):
     with open(output_path, 'w', encoding='utf-8', newline='') as output_file:
         csv_writer = csv.writer(output_file)
         csv_writer.writerow([count])
+
+
+def find_and_parse_reports(directory, partial_string, output_directory):
+    for subdir in os.listdir(directory):
+        subdir_path = os.path.join(directory, subdir)
+        if os.path.isdir(subdir_path) and partial_string in subdir:
+            report_directory = os.path.join(subdir_path, 'reports')
+            report_file = os.path.join(report_directory, 'report.csv')
+
+            if os.path.exists(report_file):
+                domain = get_domain_from_csv(report_file)
+                timestamp = subdir.split('_')[0]
+                output_filename_base = f"{domain}_{timestamp}"
+
+                summary = defaultdict(lambda: defaultdict(int))
+                unique_urls = set()
+
+                try:
+                    update_summary(summary, report_directory)
+                    unique_urls.update(get_unique_urls(report_file))
+
+                    for column, values in summary.items():
+                        output_filename = f"{output_filename_base}_{column}.csv"
+                        save_summary_to_file(output_filename, values, output_directory)
+
+                    output_filename_urls = f"{output_filename_base}_number_urls.csv"
+                    save_urls_to_file(output_filename_urls, len(unique_urls), output_directory)
+                except FileNotFoundError as e:
+                    print(f"Skipping directory {subdir} due to missing file: {e}")
+                    continue
+            else:
+                print(f"No report found for {subdir_path}")
 
 def main():
     parser = argparse.ArgumentParser(description='Find and parse reports.')
