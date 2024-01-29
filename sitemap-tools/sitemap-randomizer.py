@@ -4,6 +4,12 @@
 # Runn this script with some basic parameters. -u URL, -n number of urls, -f format for exported file. 
 # python sitemap-randomizer.py -u https://whitehouse.gov/sitemap.xml -n 2000 -f xml
 #
+#
+# Sitemap Randomizer
+# 
+# Run this script with some basic parameters. -u URL, -n number of urls, -f format for exported file. 
+# python sitemap-randomizer.py -u https://whitehouse.gov/sitemap.xml -n 2000 -f xml
+#
 
 import requests
 import random
