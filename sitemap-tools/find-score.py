@@ -63,6 +63,7 @@ def find_and_parse_reports(directory, partial_string, output_directory):
 
                 summary = defaultdict(lambda: defaultdict(int))
                 unique_urls = set()
+                print(f"Building report for {subdir_path}")
 
                 try:
                     update_summary(summary, report_directory)
