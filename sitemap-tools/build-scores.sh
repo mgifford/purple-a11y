@@ -1,3 +1,5 @@
+# Store in the ./purple-a11y/results directory with the data from Purple A11y
+
 #!/bin/bash
 
 # Get today's date in YYYYMMDD format
