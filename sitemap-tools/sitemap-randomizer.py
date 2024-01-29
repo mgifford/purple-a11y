@@ -14,6 +14,7 @@ from lxml import etree
 from io import BytesIO
 import csv
 from datetime import datetime
+import hashlib
 
 def get_sitemap_urls(url):
     try:
@@ -38,20 +39,45 @@ def get_sitemap_urls(url):
         print(f"Error fetching sitemap: {e}")
         return []
 
-def filter_and_randomize_urls(urls, exclude_strings, include_strings):
+def filter_and_randomize_urls(urls, exclude_strings, include_strings, percentage):
     excluded_extensions = ['pdf', 'zip', 'txt', 'pptx', '.pdf', '.pdf-0', '.doc', '.docx-0', '.docx', '.docx-0', '.xls', '.xls-0', '.xlsx', '.xlsx-0', '.ppt', '.ppt-0', '.pptx', '.pptx-0', '.rss', '.xml', '.zip', '.zip-0', '.zip-1', '.txt']
-    
+
+    # Filter URLs based on excluded extensions and strings
     filtered_urls = [
         url for url in urls
         if not any(url.endswith(ext) for ext in excluded_extensions) and not any(es in url for es in exclude_strings)
     ]
 
+
     # Include URLs that match the specified strings
     if include_strings:
         filtered_urls = [url for url in filtered_urls if any(es in url for es in include_strings)]
+
+    # Filter URLs based on the hash percentage
+    percent_range = int(percentage / 10)
+    allowed_starts = [str(i) for i in range(percent_range)]
+
+    def get_hash(url):
+        return hashlib.md5(url.encode()).hexdigest()
+
+    filtered_by_hash = [
+        url for url in filtered_urls
+        if get_hash(url)[0] in allowed_starts
+    ]
     
-    random.shuffle(filtered_urls)
-    return filtered_urls
+    return filtered_by_hash
+
+def get_hash(url):
+    hash_object = hashlib.md5(url.encode())
+    return hash_object.hexdigest()
+
+# Using the hash is a good way to ensure that mostly the same URLs are being scanned. 
+# Unlike a random script, this will consistently pull up mostly the same results, 
+# and they will be random
+def filter_by_hash_percentage(hashed_urls, percentage):
+    max_first_digit = percentage // 10
+    return [url for url, hash_value in hashed_urls if int(hash_value[0], 16) < max_first_digit]
+
 
 def save_urls_to_xml(urls, filename):
     with open(filename, 'w', encoding='utf-8') as file:
@@ -75,11 +101,11 @@ def main():
     parser.add_argument('-i', '--include', nargs='+', default=[], help='Strings to force inclusion from URLs.')
     parser.add_argument('-f', '--format', choices=['xml', 'csv'], default='xml', help='Output format (default: xml).')
     parser.add_argument('-o', '--output', required=True, help='Output filename with path.')
-
+    parser.add_argument('-p', '--percentage', type=int, choices=[10, 20, 30, 40, 50], default=10, help='Percentage of URLs to return (default: 10).')
     args = parser.parse_args()
 
     urls = get_sitemap_urls(args.url)
-    filtered_urls = filter_and_randomize_urls(urls, args.exclude, args.include)[:args.number]
+    filtered_urls = filter_and_randomize_urls(urls, args.exclude, args.include, args.percentage)[:args.number]
 
     # Use the specified output filename
     output_filename = args.output
