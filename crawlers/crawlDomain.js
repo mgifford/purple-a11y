@@ -85,7 +85,7 @@ const crawlDomain = async (
       strategy,
       requestQueue,
       transformRequestFunction(req) {
-        if (isDisallowedInRobotsTxt(req.url)) return null; 
+        if (isDisallowedInRobotsTxt(req.url)) return null;
         if (isUrlPdf(req.url)) {
           // playwright headless mode does not support navigation to pdf document
           req.skipNavigation = true;
@@ -101,70 +101,75 @@ const crawlDomain = async (
     };
     await page.exposeFunction('handleOnWindowOpen', handleOnWindowOpen);
 
-    await page.evaluate(() => {
-      // Override window.open
-      window.open = url => {
-        window.handleOnWindowOpen(url);
-      };
-    });
+    try {
+      await page.evaluate(() => {
+        // Override window.open
+        window.open = url => {
+          window.handleOnWindowOpen(url);
+        };
+      });
 
-    const handleOnClickEvent = async () => {
-      // Intercepting click events to handle cases where request was issued before the frame is created 
-      // when a new tab/window is opened 
-      await page.context().route('**/*', async route => {
-        if (route.request().resourceType() === 'document') {
-          try {
-            const isTopFrameNavigationRequest = () => {
-              return route.request().isNavigationRequest() 
+      const handleOnClickEvent = async () => {
+        // Intercepting click events to handle cases where request was issued before the frame is created 
+        // when a new tab/window is opened 
+        await page.context().route('**/*', async route => {
+          if (route.request().resourceType() === 'document') {
+            try {
+              const isTopFrameNavigationRequest = () => {
+                return route.request().isNavigationRequest()
                   && route.request().frame() === page.mainFrame();
-            }
+              }
 
+              if (isTopFrameNavigationRequest()) {
+                const url = route.request().url();
+                if (!isDisallowedInRobotsTxt(url)) {
+                  await requestQueue.addRequest({ url, skipNavigation: isUrlPdf(url) });
+                }
+                await route.abort('aborted');
+              } else {
+                route.continue();
+              }
+            } catch (e) {
+              silentLogger.info(e);
+              route.continue();
+            }
+          }
+        })
+      }
+      await page.exposeFunction('handleOnClickEvent', handleOnClickEvent)
+
+      await page.evaluate(() => {
+        document.addEventListener('click', (event) => handleOnClickEvent(event));
+      })
+    } catch (e) {
+      // No logging for this case as it is best effort to handle dynamic client-side JavaScript redirects and clicks.
+      // Handles browser page object been closed.
+    }
+
+    page.on('request', async request => {
+      try {
+        // Intercepting requests to handle cases where request was issued before the frame is created
+        await page.context().route(request.url(), async route => {
+          const isTopFrameNavigationRequest = () => {
+            return route.request().isNavigationRequest()
+              && route.request().frame() === page.mainFrame();
+          }
+
+          if (route.request().resourceType() === 'document') {
             if (isTopFrameNavigationRequest()) {
-              const url = route.request().url(); 
+              const url = route.request().url();
               if (!isDisallowedInRobotsTxt(url)) {
                 await requestQueue.addRequest({ url, skipNavigation: isUrlPdf(url) });
               }
-              await route.abort('aborted');
-            } else {
-              route.continue();
             }
-          } catch (e) {
-            silentLogger.info(e);
-            route.continue();
-          }
-        }
-      })
-    }
-    await page.exposeFunction('handleOnClickEvent', handleOnClickEvent)
-
-    await page.evaluate(() => {
-      document.addEventListener('click', (event) => handleOnClickEvent(event));
-    })
-
-    page.on('request', async request => {
-      // Intercepting requests to handle cases where request was issued before the frame is created
-      await page.context().route(request.url(), async route => {
-          try {
-            const isTopFrameNavigationRequest = () => {
-            return route.request().isNavigationRequest() 
-                && route.request().frame() === page.mainFrame();
-            }
-
-            if (route.request().resourceType() === 'document') {
-              if (isTopFrameNavigationRequest()) {
-                const url = route.request().url(); 
-                if (!isDisallowedInRobotsTxt(url)){
-                  await requestQueue.addRequest({ url, skipNavigation: isUrlPdf(url) });
-                }
-              }
-            }
-          } catch (e) {
-            silentLogger.info(e);
           }
         })
-      })
+      } catch (e) {
+        silentLogger.info(e);
+      }
+    })
 
-    // Try catch is necessary clicking links is best effort, it may result in new pages that cause browser load or navigation errors that PlaywrightCrawler does not handle
+    // Try catch is necessary as clicking links is best effort, it may result in new pages that cause browser load or navigation errors that PlaywrightCrawler does not handle
     try {
       await enqueueLinksByClickingElements({
         // set selector matches
@@ -174,8 +179,8 @@ const crawlDomain = async (
         // handle onclick
         selector: ':not(a):is([role="link"], button[onclick])',
         transformRequestFunction(req) {
-          if (isDisallowedInRobotsTxt(req.url)) return null; 
-          req.url = req.url.replace(/(?<=&|\?)utm_.*?(&|$)/gim, '');        
+          if (isDisallowedInRobotsTxt(req.url)) return null;
+          req.url = req.url.replace(/(?<=&|\?)utm_.*?(&|$)/gim, '');
           if (isUrlPdf(req.url)) {
             // playwright headless mode does not support navigation to pdf document
             req.skipNavigation = true;
@@ -221,7 +226,7 @@ const crawlDomain = async (
     }) => {
       // loadedUrl is the URL after redirects
       const actualUrl = request.loadedUrl || request.url;
-      
+
       if (urlsCrawled.scanned.length >= maxRequestsPerCrawl) {
         crawler.autoscaledPool.abort();
         return;
@@ -229,13 +234,13 @@ const crawlDomain = async (
 
       if (isDisallowedInRobotsTxt(request.url)) {
         await enqueueProcess(page, enqueueLinks, enqueueLinksByClickingElements);
-        return; 
+        return;
       }
 
       // handle pdfs
       if (request.skipNavigation && isUrlPdf(actualUrl)) {
         if (!isScanPdfs) {
-          guiInfoLog(guiInfoStatusTypes.SKIPPED, {            
+          guiInfoLog(guiInfoStatusTypes.SKIPPED, {
             numScanned: urlsCrawled.scanned.length,
             urlScanned: request.url,
           });
@@ -305,19 +310,20 @@ const crawlDomain = async (
           isBasicAuth = false;
         } else {
           if (isScanHtml) {
+
             const results = await runAxeScript(needsReview, includeScreenshots, page, randomToken);
             guiInfoLog(guiInfoStatusTypes.SCANNED, {
               numScanned: urlsCrawled.scanned.length,
               urlScanned: request.url,
             });
-  
+
             // For deduplication, if the URL is redirected, we want to store the original URL and the redirected URL (actualUrl)
             const isRedirected = !areLinksEqual(request.loadedUrl, request.url);
             if (isRedirected) {
               const isLoadedUrlInCrawledUrls = urlsCrawled.scanned.some(
                 item => (item.actualUrl || item.url) === request.loadedUrl,
               );
-  
+
               if (isLoadedUrlInCrawledUrls) {
                 urlsCrawled.notScannedRedirects.push({
                   fromUrl: request.url,
@@ -325,24 +331,33 @@ const crawlDomain = async (
                 });
                 return;
               }
-  
-              urlsCrawled.scanned.push({
-                url: request.url,
-                pageTitle: results.pageTitle,
-                actualUrl: request.loadedUrl, // i.e. actualUrl
-              });
-  
-              urlsCrawled.scannedRedirects.push({
-                fromUrl: request.url,
-                toUrl: request.loadedUrl, // i.e. actualUrl
-              });
-  
-              results.url = request.url;
-              results.actualUrl = request.loadedUrl;
+
+              // One more check if scanned pages have reached limit due to multi-instances of handler running
+              if (urlsCrawled.scanned.length < maxRequestsPerCrawl) {
+                urlsCrawled.scanned.push({
+                  url: request.url,
+                  pageTitle: results.pageTitle,
+                  actualUrl: request.loadedUrl, // i.e. actualUrl
+                });
+
+                urlsCrawled.scannedRedirects.push({
+                  fromUrl: request.url,
+                  toUrl: request.loadedUrl, // i.e. actualUrl
+                });
+
+                results.url = request.url;
+                results.actualUrl = request.loadedUrl;
+                await dataset.pushData(results);
+              }
             } else {
-              urlsCrawled.scanned.push({ url: request.url, pageTitle: results.pageTitle });
+
+              // One more check if scanned pages have reached limit due to multi-instances of handler running
+              if (urlsCrawled.scanned.length < maxRequestsPerCrawl) {
+                urlsCrawled.scanned.push({ url: request.url, pageTitle: results.pageTitle });
+                await dataset.pushData(results);
+              }
             }
-            await dataset.pushData(results);
+
           } else {
             guiInfoLog(guiInfoStatusTypes.SKIPPED, {
               numScanned: urlsCrawled.scanned.length,
@@ -355,23 +370,25 @@ const crawlDomain = async (
           await enqueueProcess(page, enqueueLinks, enqueueLinksByClickingElements);
         }
       } catch (e) {
-        silentLogger.info(e);
-        guiInfoLog(guiInfoStatusTypes.ERROR, {
-          numScanned: urlsCrawled.scanned.length,
-          urlScanned: request.url,
-        });
-        const browser = browserController.browser;
-        page = await browser.newPage();
-        await page.goto(request.url);
+        if (!e.message.includes("page.evaluate")) {
+          silentLogger.info(e);
+          guiInfoLog(guiInfoStatusTypes.ERROR, {
+            numScanned: urlsCrawled.scanned.length,
+            urlScanned: request.url,
+          });
+          const browser = browserController.browser;
+          page = await browser.newPage();
+          await page.goto(request.url);
 
-        await page.route('**/*', async route => {
-          const interceptedRequest = route.request();
-          if (interceptedRequest.resourceType() === 'document') {
-            await requestQueue.addRequest({ url: interceptedRequest.url(), skipNavigation: isUrlPdf(interceptedRequest.url()) });
-            return;
-          }
-        })
-        urlsCrawled.error.push({ url: request.url });
+          await page.route('**/*', async route => {
+            const interceptedRequest = route.request();
+            if (interceptedRequest.resourceType() === 'document') {
+              await requestQueue.addRequest({ url: interceptedRequest.url(), skipNavigation: isUrlPdf(interceptedRequest.url()) });
+              return;
+            }
+          })
+          urlsCrawled.error.push({ url: request.url });
+        }
       }
     },
     failedRequestHandler: async ({ request }) => {
