@@ -209,7 +209,7 @@ Other options:
 - You can specify sites to exclude from accessibility scan (e.g. login page) by adding a pattern of the domain to `exclusions.txt`. An example of `exclusions.txt`:
 
 ``` txt
-\.*singpass.gov.sg\.*
+\.*login.singpass.gov.sg\.*
 ```
 
 - You can re-run your accessibility scan by running `node generatedScript-PHScan_...js` file that is generated.
@@ -239,9 +239,9 @@ ort> -u <url> OPTIONS
 Options:
       --help             Show help                                     [boolean]
   -c, --scanner          Type of scan, 1) sitemap, 2) website crawl, 3) custom f
-                         low, 4) custom flow 2.0
+                         low, 4) custom flow 2.0, 5) intelligent
                                                                       [required] 
-                             [choices: "sitemap", "website", "custom", "custom2]
+                             [choices: "sitemap", "website", "custom", "custom2", "intelligent"]
   -u, --url              Website URL you want to scan        [string] [required]
   -d, --customDevice     Device you want to scan   [string] [default: "Desktop"]
   -w, --viewportWidth    Viewport width (in pixels) you want to scan    [number]
@@ -267,9 +267,6 @@ Options:
   -t, --specifiedMaxConcurrency  Maximum number of pages to scan concurrently.
                                  Use for sites with throttling. Defaults to 25.
                                                                         [number]
-  -f, --needsReviewItems  Whether to display rule items requiring manual review 
-                          in report. Defaults to false.
-                                                      [choices: "true", "false"]
   -i, --fileTypes                    File types to include in the scan. Defaults
                                       to html-only.
        [string] [choices: "all", "pdf-only", "html-only"] [default: "html-only"]
@@ -290,13 +287,17 @@ Options:
   -r, --followRobots                 Option for crawler to adhere to robots.txt
                                      rules if it exists
                                  [string] [choices: "yes", "no"] [default: "no"]
+  -m, --header                       The HTTP authentication header keys and the
+                                     ir respective values to enable crawler acce
+                                     ss to restricted resources.        [string]
+
 Examples:
-  To scan sitemap of website:', 'node cli.js -c [ 1 | Sitemap ] -d <device> -u
-   <url_link> -w <viewportWidth>
-  To scan a website', 'node cli.js -c [ 2 | Website ] -d <device> -u <url_link
-  > -w <viewportWidth>
-  To start a custom flow scan', 'node cli.js -c [ 3 | Custom ] -d <device> -u
-  <url_link> -w <viewportWidth>
+  To scan sitemap of website:', 'node cli.js -c [ 1 | sitemap ] -u <url_link>
+  [ -d <device> | -w <viewport_width> ]
+  To scan a website', 'node cli.js -c [ 2 | website ] -u <url_link> [ -d <devi
+  ce> | -w <viewport_width> ]
+  To start a custom flow scan', 'node cli.js -c [ 3 | custom ] -u <url_link> [
+   -d <device> | -w <viewport_width> ]
 ```
 
 ### Device Options

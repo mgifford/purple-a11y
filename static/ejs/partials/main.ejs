@@ -1,49 +1,39 @@
 <div class="d-flex flex-grow-1 align-items-stretch">
   <!-- main.ejs -->
-  <%- include("components/pagesScannedModal") %>
-  <%- include("components/screenshotLightbox") %>
+  <%- include("components/pagesScannedModal") %> <%- include("components/screenshotLightbox") %>
   <main class="d-flex flex-grow-1">
     <%- include("components/scanAbout") %>
     <!-- wcag compliance + top 5 -->
     <section class="w-100">
-
       <div class="compliance-summary">
         <div class="col card"><%- include("components/wcagCompliance") %></div>
         <div class="col card"><%- include("components/topFive") %></div>
       </div>
-      <hr class="my-2 mx-3" />
-        <!-- START search feat changes -->
-        <div id= "searchGroup" class="row m-0 py-4 px-3">
-          <%- include("components/reportSearch") %>
-        </div>
-        <!-- END search feat changes-->
-      <!-- must fix, good to fix, need review -->
-      <nav class="row m-0 pt-4 px-2" aria-label="Issue category">
-        <% Object.keys(items).forEach((category) => { %>
-        <div class="col-md-4 px-2">
-          <%- include("components/categorySelector", { category: category }) %>
-        </div>
-        <% }) %>
-      </nav>
-      <ul id="categorySummary" class="unbulleted-list px-3 py-4 mb-3 flex-grow-1">
-        <!-- dynamically generated section from scripts/categorySummary -->
-        <%# dynamically generated section from scripts/categorySummary %>
-      </ul>
-      <%- include("components/ruleOffcanvas") %> 
-      <p id="containsAISuggestions" class="d-none">
-        Tooltip: Contains AI suggestions.
+      <hr class="my-4 mx-3" />
+      <!-- jsOffMessage -->
+      <p id="jsOffMessage" class="mx-3">
+        Please open this file in a browser to experience the report's full functionality.
       </p>
-      <p id="mustFixAriaDescription" class="d-none">
-        Tooltip: Issues that need to be addressed promptly, as they create significant barriers for
-        persons with disabilities and can prevent them from accessing essential content or features.
-      </p>
-      <p id="goodToFixAriaDescription" class="d-none">
-        Tooltip: Issues that could pose certain challenges for persons with disabilities (PWDs), but
-        are unlikely to completely hinder their access to essential content or features.
-      </p>
-      <p id="passedAriaDescription" class="d-none">
-        Tooltip: Occurrences that passed the automated checks.
-      </p>
+      <div id="jsOn" class="d-none">
+        <!-- Search Feat Input -->
+        <div id="searchGroup" class="row m-0 px-3"><%- include("components/reportSearch") %></div>
+        <!-- Button Category Selector -->
+        <%- include("components/categorySelector") %>
+
+        <!-- Dropdown Category Selector -->
+        <%- include("components/categorySelectorDropdown") %>
+        <ul id="categorySummary" class="unbulleted-list px-3 py-4 mb-3 flex-grow-1">
+          <!-- dynamically generated section from scripts/categorySummary -->
+          <%# dynamically generated section from scripts/categorySummary %>
+        </ul>
+        <%- include("components/ruleOffcanvas") %>
+        <p id="containsAISuggestions" class="d-none">Tooltip: Contains AI suggestions.</p>
+        <p id="mustFixAriaDescription" class="d-none">Tooltip: <%= items.mustFix.description %></p>
+        <p id="goodToFixAriaDescription" class="d-none">
+          Tooltip: <%= items.goodToFix.description %>
+        </p>
+        <p id="passedAriaDescription" class="d-none">Tooltip: <%= items.passed.description %></p>
+      </div>
     </section>
   </main>
 </div>

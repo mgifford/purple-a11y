@@ -7,7 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import ejs from 'ejs';
 import constants from './constants/constants.js';
-import { createScreenshotsFolder, getCurrentTime, getStoragePath, getVersion } from './utils.js';
+import { createScreenshotsFolder, getFormattedTime, getStoragePath, getVersion, getWcagPassPercentage, formatDateTimeForMassScanner } from './utils.js';
 import { consoleLogger, silentLogger } from './logs.js';
 import itemTypeDescription from './constants/itemTypeDescription.js';
 import { chromium } from 'playwright';
@@ -233,18 +233,20 @@ const writeSummaryPdf = async (storagePath, filename = 'summary') => {
 const pushResults = async (pageResults, allIssues, isCustomFlow) => {
   const { url, pageTitle, filePath } = pageResults;
 
-  allIssues.totalPagesScanned += 1;
 
   const totalIssuesInPage = new Set();
   Object.keys(pageResults.mustFix.rules).forEach(k => totalIssuesInPage.add(k));
   Object.keys(pageResults.goodToFix.rules).forEach(k => totalIssuesInPage.add(k));
+  Object.keys(pageResults.needsReview.rules).forEach(k => totalIssuesInPage.add(k));
+
   allIssues.topFiveMostIssues.push({ url, pageTitle, totalIssues: totalIssuesInPage.size });
 
-  ['mustFix', 'goodToFix', 'passed'].forEach(category => {
+  ['mustFix', 'goodToFix', 'needsReview', 'passed'].forEach(category => {
     if (!pageResults[category]) return;
+
     const { totalItems, rules } = pageResults[category];
     const currCategoryFromAllIssues = allIssues.items[category];
-
+    
     currCategoryFromAllIssues.totalItems += totalItems;
 
     Object.keys(rules).forEach(rule => {
@@ -309,7 +311,7 @@ const pushResults = async (pageResults, allIssues, isCustomFlow) => {
 };
 
 const flattenAndSortResults = (allIssues, isCustomFlow) => {
-  ['mustFix', 'goodToFix', 'passed'].forEach(category => {
+  ['mustFix', 'goodToFix', 'needsReview', 'passed'].forEach(category => {
     allIssues.totalItems += allIssues.items[category].totalItems;
     allIssues.items[category].rules = Object.entries(allIssues.items[category].rules)
       .map(ruleEntry => {
@@ -359,6 +361,7 @@ const createRuleIdJson = allIssues => {
 
   allIssues.items.mustFix.rules.forEach(ruleIterator);
   allIssues.items.goodToFix.rules.forEach(ruleIterator);
+  allIssues.items.needsReview.rules.forEach(ruleIterator);
   return compiledRuleJson;
 };
 
@@ -378,7 +381,9 @@ export const generateArtifacts = async (
   pagesScanned,
   pagesNotScanned,
   customFlowLabel,
-  cypressScanAboutMetadata
+  cypressScanAboutMetadata,
+  scanDetails
+
 ) => {
   const phAppVersion = getVersion();
   const storagePath = getStoragePath(randomToken);
@@ -390,14 +395,14 @@ export const generateArtifacts = async (
       htmlETL: purpleAiHtmlETL,
       rules: purpleAiRules,
     },
-    startTime: getCurrentTime(),
+    startTime: scanDetails.startTime? getFormattedTime(scanDetails.startTime) : getFormattedTime(),
     urlScanned,
     scanType,
     isCustomFlow,
     viewport,
     pagesScanned,
     pagesNotScanned,
-    totalPagesScanned: 0,
+    totalPagesScanned: pagesScanned.length,
     totalPagesNotScanned: pagesNotScanned.length,
     totalItems: 0,
     topFiveMostIssues: [],
@@ -407,9 +412,11 @@ export const generateArtifacts = async (
     items: {
       mustFix: { description: itemTypeDescription.mustFix, totalItems: 0, rules: {} },
       goodToFix: { description: itemTypeDescription.goodToFix, totalItems: 0, rules: {} },
+      needsReview: { description: itemTypeDescription.needsReview, totalItems: 0, rules: {} },
       passed: { description: itemTypeDescription.passed, totalItems: 0, rules: {} },
     },
-    cypressScanAboutMetadata
+    cypressScanAboutMetadata,
+    wcagLinks: constants.wcagLinks
   };
   const allFiles = await extractFileNames(directory);
 
@@ -428,13 +435,12 @@ export const generateArtifacts = async (
 
   flattenAndSortResults(allIssues, isCustomFlow);
 
-  // allIssues.totalPages = allIssues.totalPagesScanned;
-
   printMessage([
     'Scan Summary',
     '',
     `Must Fix: ${allIssues.items.mustFix.rules.length} issues / ${allIssues.items.mustFix.totalItems} occurrences`,
     `Good to Fix: ${allIssues.items.goodToFix.rules.length} issues / ${allIssues.items.goodToFix.totalItems} occurrences`,
+    `Needs Review: ${allIssues.items.needsReview.rules.length} issues / ${allIssues.items.needsReview.totalItems} occurrences`,
     `Passed: ${allIssues.items.passed.totalItems} occurrences`,
   ]);
 
@@ -444,6 +450,90 @@ export const generateArtifacts = async (
     createScreenshotsFolder(randomToken);
   }
 
+  allIssues.wcagPassPercentage = getWcagPassPercentage(allIssues.wcagViolations);
+ 
+  const getAxeImpactCount = (data) => {
+    const impactCount = {
+      "critical": 0,
+      "serious": 0,
+      "moderate": 0,
+      "minor": 0
+    };
+    Object.values(data.items).forEach(category =>{
+    if (category.totalItems>0) {
+      category.rules.forEach(rule => {
+        if (rule.axeImpact === 'critical') {
+          impactCount.critical += rule.totalItems;
+        } else if (rule.axeImpact === 'serious') {
+          impactCount.serious += rule.totalItems;
+        } else if (rule.axeImpact === 'moderate') {
+          impactCount.moderate += rule.totalItems;
+        } else if (rule.axeImpact === 'minor') {
+          impactCount.minor += rule.totalItems;
+        }
+      });
+    }
+  })
+  
+    return impactCount;
+  };
+
+
+
+  if (process.env.RUNNING_FROM_MASS_SCANNER) {
+
+    let axeImpactCount = getAxeImpactCount(allIssues)
+
+    let scanData = {
+      "url": allIssues.urlScanned,
+      "startTime": formatDateTimeForMassScanner(allIssues.startTime),
+      "endTime": formatDateTimeForMassScanner(scanDetails? getFormattedTime(scanDetails.endTime):getFormattedTime()),
+      "pagesScanned": allIssues.pagesScanned.length,
+      "wcagPassPercentage": allIssues.wcagPassPercentage,
+      "critical": axeImpactCount.critical,
+      "serious": axeImpactCount.serious,
+      "moderate": axeImpactCount.moderate,
+      "minor": axeImpactCount.minor,
+      "mustFix": {
+        "issues": allIssues.items.mustFix.rules.length,
+        "occurrence": allIssues.items.mustFix.totalItems,
+        "rules": allIssues.items.mustFix.rules,
+      },
+      "goodToFix": {
+        "issues": allIssues.items.goodToFix.rules.length,
+        "occurrence": allIssues.items.goodToFix.totalItems,
+        "rules": allIssues.items.goodToFix.rules,
+      },
+      "needsReview": {
+        "issues": allIssues.items.needsReview.rules.length,
+        "occurrence": allIssues.items.needsReview.totalItems,
+        "rules": allIssues.items.needsReview.rules,
+      },
+      "passed": {
+        "occurrence": allIssues.items.passed.totalItems
+      }
+    };
+
+    let scanDataMessage = {
+      type: 'scanData',
+      payload: scanData
+    }
+    
+    let scanSummaryMessage = {
+      type: 'scanSummary',
+      payload: [
+        `Must Fix: ${allIssues.items.mustFix.rules.length} issues / ${allIssues.items.mustFix.totalItems} occurrences`,
+        `Good to Fix: ${allIssues.items.goodToFix.rules.length} issues / ${allIssues.items.goodToFix.totalItems} occurrences`,
+        `Needs Review: ${allIssues.items.needsReview.rules.length} issues / ${allIssues.items.needsReview.totalItems} occurrences`,
+        `Passed: ${allIssues.items.passed.totalItems} occurrences`,
+        `Results directory: ${storagePath}`,
+      ]
+    }
+
+    process.send(JSON.stringify(scanDataMessage));
+    process.send(JSON.stringify(scanSummaryMessage));
+  }
+
   await writeResults(allIssues, storagePath);
   await writeCsv(allIssues, storagePath);
   await writeHTML(allIssues, storagePath);
@@ -451,3 +541,5 @@ export const generateArtifacts = async (
   await writeSummaryPdf(storagePath);
   return createRuleIdJson(allIssues);
 };
+
+ 

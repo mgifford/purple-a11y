@@ -14,7 +14,7 @@ export const alertMessageOptions = {
 export const cliOptions = {
   c: {
     alias: 'scanner',
-    describe: 'Type of scan, 1) sitemap, 2) website crawl, 3) custom flow, 4) custom flow 2.0',
+    describe: 'Type of scan, 1) sitemap, 2) website crawl, 3) custom flow, 4) custom flow 2.0, 5) intelligent',
     choices: Object.keys(constants.scannerTypes),
     demandOption: true,
   },
@@ -101,13 +101,7 @@ export const cliOptions = {
     type: 'number',
     demandOption: false,
   },
-  f: {
-    alias: 'needsReviewItems',
-    describe: 'Whether to display items requiring manual review in report. Defaults to false.',
-    type: 'string',
-    choices: ['true', 'false'],
-    demandOption: false,
-  },
+  
   i: {
     alias: 'fileTypes',
     describe: 'File types to include in the scan. Defaults to html-only.',
@@ -144,14 +138,22 @@ export const cliOptions = {
     demandOption: false,
   },
   r: {
-    alias: 'followRobots', 
-    describe: 'Option for crawler to adhere to robots.txt rules if it exists', 
-    type: 'string', 
+    alias: 'followRobots',
+    describe: 'Option for crawler to adhere to robots.txt rules if it exists',
+    type: 'string',
     choices: ['yes', 'no'],
     requiresArg: true,
     default: 'no',
     demandOption: false,
-  }
+  },
+  m: {
+    alias: 'header',
+    describe:
+      'The HTTP authentication header keys and their respective values to enable crawler access to restricted resources.',
+    type: 'string',
+    requiresArg: true,
+    demandOption: false,
+  },
 };
 
 export const configureReportSetting = isEnabled => {

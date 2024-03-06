@@ -95,7 +95,6 @@ export const screenshotFullPage = async (page, screenshotsDir, screenshotIdx) =>
 
 export const runAxeScan = async (
   page,
-  needsReviewItems,
   includeScreenshots,
   randomToken,
   customFlowDetails,
@@ -103,7 +102,6 @@ export const runAxeScan = async (
   urlsCrawled,
 ) => {
   const result = await runAxeScript(
-    needsReviewItems,
     includeScreenshots,
     page,
     randomToken,
@@ -124,7 +122,6 @@ export const processPage = async (page, processPageParams) => {
   processPageParams.scannedIdx += 1;
   const {
     scannedIdx,
-    needsReviewItems,
     blacklistedPatterns,
     includeScreenshots,
     dataset,
@@ -177,7 +174,6 @@ export const processPage = async (page, processPageParams) => {
 
   await runAxeScan(
     page,
-    needsReviewItems,
     includeScreenshots,
     randomToken,
     {
@@ -396,9 +392,13 @@ export const initNewPage = async (page, pageClosePromises, processPageParams, pa
   page.on('domcontentloaded', async () => {
     log(`Content loaded: ${page.url()}`);
     try {
-      await page.waitForLoadState();
       await removeOverlayMenu(page);
       await addOverlayMenu(page, processPageParams.urlsCrawled, menuPos);
+      await page.waitForLoadState();
+      const existingOverlay = await page.evaluate(() => {
+        return document.querySelector('#purple-a11y-shadow-host');
+      });
+      if (!existingOverlay) { await addOverlayMenu(page, processPageParams.urlsCrawled, menuPos);}
     } catch (e) {
       consoleLogger.info("Error in adding overlay menu to page");
       silentLogger.info("Error in adding overlay menu to page");
