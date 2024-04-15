@@ -1,0 +1,19 @@
+Example1:
+  - type: crawl
+    url: https://www.whitehouse.gov
+    start_date: '2024-04-10 00:00:00'
+    name:  Website Crawl
+    description: A crawl of a website
+    max: 50
+    sheet_id: 
+    exclude: 
+
+Example2:
+  - type: sitemap
+    url: file:///Users/me/example.xml
+    start_date: '2024-04-10 00:00:00'
+    name: Website Scan
+    description: A crawl of another website
+    max: 50 
+    sheet_id: 
+    exclude:
