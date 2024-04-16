@@ -54,7 +54,6 @@ async function main() {
   const command = `node --max-old-space-size=6000 --no-deprecation purple-a11y/cli.js -u ${siteUrl} -c ${siteType === 'sitemap' ? 1 : "2 -s same-hostname"} -p ${maxPages} -k "CivicActions gTracker:accessibility@civicactions.com"`;
  
       const startTime = new Date();
-      console.log(`Site URL: (${startTime})`);
 
       let reportPath = ""; // Reset path for each site
 
@@ -81,7 +80,6 @@ async function main() {
       try {
         console.log(`Command: ${command}`);
         const output = await runCommandWithTimeout(command);
-        console.log('Command output:', output);
         await new Promise(resolve => setTimeout(resolve, 5000));
       } catch (error) {
         console.error("Command failed after all retries:", error);
@@ -196,7 +194,7 @@ async function runCommandWithTimeout(command, maxAttempts = 1, retryDelay = 3000
         maxBuffer: 1024 * 1024, // Increase maxBuffer size if necessary
       });
 
-      console.log('stdout:', stdout);
+      // console.log('stdout:', stdout);
       console.log('stderr:', stderr);
 
       // console.log(`Command succeeded on attempt ${attempt}`);
@@ -206,7 +204,7 @@ async function runCommandWithTimeout(command, maxAttempts = 1, retryDelay = 3000
     } catch (error) {
       console.error(`runCommandWithTimeout: Attempt ${attempt} failed: ${error.message}`);
       console.log('stdout:', stdout);
-      console.log('stderr:', stderr);
+      // console.log('stderr:', stderr);
       if (attempt < maxAttempts) {
         console.log(`Waiting ${retryDelay / 1000} seconds before retrying...`);
         await new Promise(resolve => setTimeout(resolve, retryDelay));
@@ -524,11 +522,19 @@ function formatWcagCriteria(criteria) {
 
 
 // Do what is needed to prepare the data for upload, limit results to 8000 by default
-async function prepareDataForUpload(filePath, count = 8000) {
+async function prepareDataForUpload(filePath, count = 10000) {
   try {
     const fileContent = await fsPromises.readFile(filePath, "utf8");
     const records = await parseCSV(fileContent);
-    return records.slice(0, count).map(record => ({
+    
+    // Filter and prioritize the records
+    const mustFix = records.filter(record => record.severity === 'mustFix');
+    const goodToFix = records.filter(record => record.severity === 'goodToFix');
+    const needsReview = records.filter(record => record.severity === 'needsReview');
+    
+    const prioritizedRecords = [...mustFix, ...goodToFix, ...needsReview];
+    
+    return prioritizedRecords.slice(0, count).map(record => ({
       url: record.url,
       axeImpact: record.axeImpact,
       severity: record.severity,
