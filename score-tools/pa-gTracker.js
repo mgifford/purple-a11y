@@ -51,7 +51,7 @@ async function main() {
 
   // Define the command to run your scan based on the site type and other parameters
   // Removed as I don't think these are working in purple-a11y:  -a none ${exclude ? `--blacklistedPatternsFilename ${exclude}` : ''} 
-  const command = `node --max-old-space-size=6000 --no-deprecation purple-a11y/cli.js -u ${siteUrl} -c ${siteType === 'sitemap' ? 1 : "2 -s same-domain"} -p ${maxPages} -k "CivicActions gTracker:accessibility@civicactions.com"`;
+  const command = `node --max-old-space-size=6000 --no-deprecation purple-a11y/cli.js -u ${siteUrl} -c ${siteType === 'sitemap' ? 1 : "2 -s same-hostname"} -p ${maxPages} -k "CivicActions gTracker:accessibility@civicactions.com"`;
  
       const startTime = new Date();
       console.log(`Site URL: (${startTime})`);
@@ -69,7 +69,6 @@ async function main() {
           fields: "spreadsheetId",
         });
         const sheetId = responseSpreadsheet.data.spreadsheetId;
-        const sheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}`;
 
         let responseURL = await fetch(siteUrl);
         if (!responseURL) {
@@ -93,9 +92,13 @@ async function main() {
 
       // Process the results and update the Google Sheet
       try {
+
         const reportPath = path.join(RESULTS_DIR, getMostRecentDirectory(siteUrl), "reports", "report.csv");
 
         waitForFile(reportPath);
+        fs.exists(reportPath, (exists) => {
+          console.log(`${reportPath} ${exists ? 'exists' : 'does not exist'}`);
+        });
 
         // Optionally, call prepareDataForUpload if you need to process CSV data
         let processedRecords = await prepareDataForUpload(reportPath);
@@ -113,7 +116,7 @@ async function main() {
         await new Promise(resolve => setTimeout(resolve, 60000));
 
         
-        console.log(`Data uploaded to Google Sheet URL: ${sheetUrl}`);
+        console.log(`Data uploaded to Google Sheet URL: https://docs.google.com/spreadsheets/d/${sheetId}`);
         logMemoryUsage();
 
         // Clear processed records to free up memory
