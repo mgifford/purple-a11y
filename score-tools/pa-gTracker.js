@@ -522,7 +522,7 @@ function formatWcagCriteria(criteria) {
 
 
 // Do what is needed to prepare the data for upload, limit results to 8000 by default
-async function prepareDataForUpload(filePath, count = 10000) {
+async function prepareDataForUpload(filePath, count = 8000) {
   try {
     const fileContent = await fsPromises.readFile(filePath, "utf8");
     const records = await parseCSV(fileContent);
