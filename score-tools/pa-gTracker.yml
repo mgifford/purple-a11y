@@ -17,3 +17,12 @@ Example2:
     max: 50 
     sheet_id: 
     exclude:
+
+Break:
+  - Type: break
+    start_date: 'Now'
+    name: Break
+    description: A break crawl for troubleshooting purposes
+    max: 
+    sheet_id: 
+    exclude:
