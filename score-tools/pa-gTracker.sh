@@ -14,7 +14,10 @@ start=$(date +%s.%N)
 
 for siteKey in $siteKeys; do
     counter=$((counter+1))
-    echo "\nProcessing site ($counter): $siteKey\n"
+
+    echo
+    echo "Processing site ($counter): $siteKey"
+    echo 
 
     # Correcting the index looping method
     rows=$(yq e ".$siteKey | length" $yamlConfigPath)
@@ -28,6 +31,10 @@ for siteKey in $siteKeys; do
         exclude=$(yq e ".$siteKey.[$row].exclude" $yamlConfigPath)
         start_date=$(yq e ".$siteKey.[$row].start_date" $yamlConfigPath)
 
+        if [ "$type" = "break" ]; then
+            echo "Stopping program execution..."
+            exit
+        fi
 
         # Debugging print
         echo "Run: node --max-old-space-size=6000  $nodeScriptPath --type $type --name $name --url $url --max $max --sheet_id $sheet_id --exclude $exclude"
@@ -46,8 +53,15 @@ for siteKey in $siteKeys; do
     duration_h=$(echo "$duration / 3600" | bc)
     duration_m=$(echo "($duration % 3600) / 60" | bc)
     duration_s=$(echo "$duration % 60" | bc)
+    
+    # Check if duration is a valid number
+    if [[ ! $duration =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        duration=0
+    fi
+    
     duration_formatted=$(printf "%02d:%02d:%02d" "$duration_h" "$duration_m" "$duration_s")
 
     # Print the execution time
     echo "Execution time: $duration_formatted"
+
 done
