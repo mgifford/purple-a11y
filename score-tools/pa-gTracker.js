@@ -25,13 +25,14 @@ const CREDENTIALS_PATH = path.join(baseDir, "credentials.json");
 
 // Parse command-line arguments
 const argv = yargs(hideBin(process.argv)).options({
-  type: { type: 'string', demandOption: true },
+  type: { type: 'string', demandOption: true, default: 'crawl'},
   name: { type: 'string', demandOption: true },
   url: { type: 'string', demandOption: true },
-  max: { type: 'number', demandOption: true },
+  max: { type: 'number', demandOption: true, default: 100},
   sheet_id: { type: 'string', demandOption: true },
-  exclude: { type: 'string', demandOption: true },
-}).argv;   // sheet_url: { type: 'string', demandOption: true }
+  exclude: { type: 'string', demandOption: true, default: ''},
+  strategy: { type: 'string', demandOption: true, default: 'same-hostname'},
+}).argv; 
 
 async function main() {
   // Authenticate with Google Sheets API
@@ -44,6 +45,7 @@ async function main() {
   const maxPages = argv.max;
   const sheetId = argv.sheet_id;   
   const exclude = argv.exclude;
+  const strategy = argv.strategy;
 
   console.log(`\n\n\n ++++====++++ \n\nStarting Scan for ${siteName}`);
   console.log(`Processing ${siteType} for URL: ${siteUrl} with max pages: ${maxPages}`);
@@ -51,8 +53,13 @@ async function main() {
 
   // Define the command to run your scan based on the site type and other parameters
   // Removed as I don't think these are working in purple-a11y:  -a none ${exclude ? `--blacklistedPatternsFilename ${exclude}` : ''} 
-  const command = `node --max-old-space-size=6000 --no-deprecation purple-a11y/cli.js -u ${siteUrl} -c ${siteType === 'sitemap' ? 1 : "2 -s same-hostname"} -p ${maxPages} -k "CivicActions gTracker:accessibility@civicactions.com"`;
- 
+
+  let typeOption = `-c 2 -s ${strategy}`;
+  if (siteType === 'sitemap') {
+    typeOption = " -c 1";
+  } 
+  const command = `node --max-old-space-size=6000 --no-deprecation purple-a11y/cli.js -u ${siteUrl} ${typeOption} -p ${maxPages} -k "CivicActions gTracker:accessibility@civicactions.com"`;
+
       const startTime = new Date();
 
       let reportPath = ""; // Reset path for each site
@@ -171,7 +178,7 @@ function getNewToken(oAuth2Client) {
  * @param {number} retryDelay Delay between retries in milliseconds.
  * @param {number} totalTimeout Total timeout for each command execution in milliseconds.
  */
-async function runCommandWithTimeout(command, maxAttempts = 1, retryDelay = 30000, totalTimeout = 720000) {
+async function runCommandWithTimeout(command, maxAttempts = 3, retryDelay = 30000, totalTimeout = 720000) {
   // console.log(`runCommandWithTimeout: Attempting to run command: ${command}`);
 
   let attempt = 0;
@@ -181,30 +188,28 @@ async function runCommandWithTimeout(command, maxAttempts = 1, retryDelay = 3000
     attempt++;
     try {
       console.log(`Attempt ${attempt}: Executing command: ${command}`);
-      // logMemoryUsage();
+      logMemoryUsage();
 
       // Enhanced logging including the shell used
       console.log(`Running command: ${command}`);
-      console.log(`Using shell: ${process.env.SHELL || 'default shell'}`);
+      // console.log(`Using shell: ${process.env.SHELL || 'default shell'}`);
+
       const { stdout, stderr } = await execPromise(command, {
         timeout: totalTimeout,
         shell: '/bin/zsh', // Specify the shell if necessary
-        env: env, // Pass environment variables
-        encoding: 'utf8', // Set encoding to utf8 to capture stdout and stderr as strings
+        env: process.env, // env, // Pass environment variables
+        encoding: 'utf8', 
         maxBuffer: 1024 * 1024, // Increase maxBuffer size if necessary
       });
+      console.log('Command success, output:', stdout);
 
-      // console.log('stdout:', stdout);
-      console.log('stderr:', stderr);
-
-      // console.log(`Command succeeded on attempt ${attempt}`);
-      console.log('stdout:', stdout);
       return true;
 
     } catch (error) {
       console.error(`runCommandWithTimeout: Attempt ${attempt} failed: ${error.message}`);
-      console.log('stdout:', stdout);
-      // console.log('stderr:', stderr);
+
+      console.log('Command failed, error:', error);
+
       if (attempt < maxAttempts) {
         console.log(`Waiting ${retryDelay / 1000} seconds before retrying...`);
         await new Promise(resolve => setTimeout(resolve, retryDelay));
@@ -215,18 +220,102 @@ async function runCommandWithTimeout(command, maxAttempts = 1, retryDelay = 3000
   }
 }
 
+async function clearSheetContents(sheets, spreadsheetId, sheetName) {
+  try {
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId,
+      range: `${sheetName}!A1:Z`,
+    });
+    console.log(`Cleared contents of sheet "${sheetName}".`);
+  } catch (err) {
+    console.error(`Error clearing sheet contents: ${err}`);
+    throw err; // Rethrow to handle in retry logic
+  }
+}
 
-async function uploadToGoogleSheet(
-  auth,
-  spreadsheetId,
-  processedRecords,
-  scanDuration,
-) {
+async function appendDataToSheet(sheets, spreadsheetId, sheetName, data) {
+  try {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId,
+      range: `${sheetName}!A1`,
+      valueInputOption: "USER_ENTERED",
+      resource: { values: data },
+    });
+    console.log(`Data appended to sheet "${sheetName}" successfully.`);
+  } catch (err) {
+    console.error(`Error appending data to sheet: ${err}`);
+    throw err; // Rethrow to handle in retry logic
+  }
+}
+
+async function ensureSheetExists(sheets, spreadsheetId, sheetName) {
+  try {
+    const sheetMetadata = await sheets.spreadsheets.get({
+      spreadsheetId,
+      fields: "sheets(properties.title)",
+    });
+    const sheetTitles = sheetMetadata.data.sheets.map(sheet => sheet.properties.title);
+
+    if (!sheetTitles.includes(sheetName)) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        resource: {
+          requests: [{
+            addSheet: { properties: { title: sheetName } }
+          }],
+        },
+      });
+      console.log(`Sheet "${sheetName}" created.`);
+    }
+  } catch (err) {
+    console.error(`Error ensuring sheet exists: ${err}`);
+    throw err; // Rethrow to handle in retry logic
+  }
+}
+
+async function uploadToGoogleSheet(auth, spreadsheetId, processedRecords, scanDuration) {
+  const sheets = google.sheets({version: "v4", auth});
+  const today = new Date();
+  const sheetName = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, "0")}-${today.getDate().toString().padStart(2, "0")}`;
+
+  try {
+    // Ensure the sheet exists, retry on failure
+    await ensureSheetExists(sheets, spreadsheetId, sheetName);
+    // Check if clearing is needed then clear contents, retry on failure
+    await clearSheetContents(sheets, spreadsheetId, sheetName);
+    // Append data to the sheet, retry on failure
+    await appendDataToSheet(sheets, spreadsheetId, sheetName, [
+      // Header row
+      ["URL", "axe Impact", "Severity", "Issue ID", "WCAG Conformance", "Context", "HTML Fingerprint", "XPath", "Hash Context", "Hash xPath"],
+      ...processedRecords.map(record => [
+        record.url,
+        record.axeImpact,
+        record.severity,
+        record.issueId,
+        record.wcagConformance,
+        record.context,
+        record.htmlFingerprint,
+        record.xpath,
+        record.md5Hashcontext,
+        record.md5Hashxpath,
+      ])
+    ]);
+  } catch (err) {
+    console.error("Failed to upload data to Google Sheet:", err);
+    throw err; // Consider how to handle this failure externally
+  }
+}
+
+
+
+
+
+
+
+/*
+async function uploadToGoogleSheet(auth, spreadsheetId, processedRecords, scanDuration) {
   console.log("uploadToGoogleSheet: Starting upload to Google Sheet");
-  const sheets = google.sheets({
-    version: "v4",
-    auth,
-  });
+  const sheets = google.sheets({version: "v4", auth});
   try {
     // Define your headers here -- MAKE THIS ORDER MAKE SENSE
     const headers = [
@@ -316,6 +405,8 @@ async function uploadToGoogleSheet(
 
   processedRecords = null; // Clear the processed records to free up memory
 }
+
+*/
 
 // Authentication
 
