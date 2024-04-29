@@ -4,19 +4,21 @@ const readline = require("readline");
 const { google } = require("googleapis");
 const yargs = require("yargs/yargs");
 const { hideBin } = require("yargs/helpers");
-const { exec } = require('child_process');
+
 const fsPromises = require("fs").promises;
 const crypto = require("crypto");
 
 
 const util = require('util');
-const execPromise = util.promisify(exec);
+// const execPromise = util.promisify(exec);
 const { parse } = require("csv-parse");
 
 
 // Global Variables
 const path = require('path');
 const { JSDOM } = require("jsdom");
+// const { exec } = require('child_process');
+const { spawn } = require('child_process');
 const baseDir = path.resolve(__dirname);
 
 const RESULTS_DIR = path.join(baseDir, "results");
@@ -86,7 +88,7 @@ async function main() {
       // Await the completion of the command, including handling retries
       try {
         console.log(`Command: ${command}`);
-        const output = await runCommandWithTimeout(command);
+        const output = await runCommandWithTimeout(command, maxPages);
         await new Promise(resolve => setTimeout(resolve, 5000));
       } catch (error) {
         console.error("Command failed after all retries:", error);
@@ -171,6 +173,9 @@ function getNewToken(oAuth2Client) {
 // main().catch(console.error);
 
 
+
+
+
 /**
  * Runs a command with a specified timeout and retry logic.
  * @param {string} command The command to run.
@@ -178,47 +183,85 @@ function getNewToken(oAuth2Client) {
  * @param {number} retryDelay Delay between retries in milliseconds.
  * @param {number} totalTimeout Total timeout for each command execution in milliseconds.
  */
-async function runCommandWithTimeout(command, maxAttempts = 3, retryDelay = 30000, totalTimeout = 720000) {
-  // console.log(`runCommandWithTimeout: Attempting to run command: ${command}`);
+async function runCommandWithTimeout(command, maxPages, maxAttempts = 3, retryDelay = 30000, totalTimeout = 720000) {
+  let currentPageCount = 0; // Variable to track the highest page number processed
+  const parts = command.split(' ');
+  const cmd = parts[0];
+  const args = parts.slice(1);
 
   let attempt = 0;
-  const env = { ...process.env }; // Duplicate current environment variables
 
   while (attempt < maxAttempts) {
     attempt++;
     try {
       console.log(`Attempt ${attempt}: Executing command: ${command}`);
-      logMemoryUsage();
+      let stdout = ''; // Reset stdout content for each attempt
+      let stderr = ''; // Reset stderr content for each attempt
 
-      // Enhanced logging including the shell used
-      console.log(`Running command: ${command}`);
-      // console.log(`Using shell: ${process.env.SHELL || 'default shell'}`);
+      // Create a promise for the command execution
+      const commandPromise = new Promise((resolve, reject) => {
+        const child = spawn(cmd, args, { shell: true });
 
-      const { stdout, stderr } = await execPromise(command, {
-        timeout: totalTimeout,
-        shell: '/bin/zsh', // Specify the shell if necessary
-        env: process.env, // env, // Pass environment variables
-        encoding: 'utf8', 
-        maxBuffer: 1024 * 1024, // Increase maxBuffer size if necessary
+        // Handle stdout data
+        child.stdout.on('data', (data) => {
+          stdout += data.toString();
+          console.log(data.toString()); // Log real-time output
+
+          // Parse output line by line and check for "Results directory is at"
+          const lines = stdout.split('\n');
+          lines.forEach(line => {
+              if (line.includes('Scan Summary')) {
+                  return true; // Report has finished, return from the function
+              }
+          });
+
+          // Check if the number of pages processed meets the maximum
+          if (currentPageCount >= maxPages) {
+              console.log(`Reached maximum page count of ${maxPages}.`);
+              child.kill(); // Terminate the child process early
+              resolve();
+          }
+        });
+
+        // Handle stderr data
+        child.stderr.on('data', (data) => {
+          stderr += data.toString(); // Convert data to string and append to stderr
+        });
+
+        // Handle process exit
+        child.on('exit', (code) => {
+          if (code === 0) {
+              resolve(stdout); // Resolve with output on successful exit
+          } else {
+              reject(new Error(`Command failed with exit code ${code}: ${command}`));
+          }
+        });
+
+        // Set timeout for the command execution
+        setTimeout(() => {
+            child.kill(); // Ensure to kill the process if timeout
+            reject(new Error(`Command timed out after ${totalTimeout} milliseconds: ${command}`));
+        }, totalTimeout);
       });
-      console.log('Command success, output:', stdout);
 
+      // Await the command execution
+      await commandPromise;
+      if (currentPageCount >= maxPages) break; // Stop attempts if maxPages reached
       return true;
 
     } catch (error) {
       console.error(`runCommandWithTimeout: Attempt ${attempt} failed: ${error.message}`);
 
-      console.log('Command failed, error:', error);
-
       if (attempt < maxAttempts) {
         console.log(`Waiting ${retryDelay / 1000} seconds before retrying...`);
         await new Promise(resolve => setTimeout(resolve, retryDelay));
       } else {
-        throw new Error(`Command failed after ${maxAttempts} attempts: ${command}`);
+        throw error;
       }
     }
   }
 }
+
 
 async function clearSheetContents(sheets, spreadsheetId, sheetName) {
   try {
