@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Path to your Node.js script
-nodeScriptPath="./pa-gTracker.js"
-# Path to your YAML configuration file
+nodeScriptPath="./pa-gTracker-earlier.js"
+
+# Path to default YAML configuration file & some executables
 yamlConfigPath="./pa-gTracker.yml"
-# Paths to homebrew executables
 yqPath="/opt/homebrew/bin/yq"
 timeoutPath="/opt/homebrew/bin/timeout"
 
@@ -48,9 +48,8 @@ for siteKey in $siteKeys; do
         today=$(date +%A)
         time=$(date +%H:%M:%S)
         # Check if start_date is equal to today's day
-        if [ "$start_date" = "$today" ]; then
+        if [ "$start_date" = "All" ] || [ "$start_date" = "$today" ]; then
             echo "Continuing as start_date matches today's day. Time: $time"
-
         else
             echo "$name - $start_date skipping to next element..."
             continue
