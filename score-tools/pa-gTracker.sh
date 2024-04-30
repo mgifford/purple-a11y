@@ -62,7 +62,7 @@ for siteKey in $siteKeys; do
         echo $type
 
         # Debugging print
-        echo "Run: node --max-old-space-size=6000  $nodeScriptPath --type $type --name $name --url $url --max $max --sheet_id $sheet_id --exclude $exclude --strategy $strategy"
+        # echo "Run: node --max-old-space-size=6000  $nodeScriptPath --type $type --name $name --url $url --max $max --sheet_id $sheet_id --exclude $exclude --strategy $strategy"
         
         # Run the Node.js script with these parameters (uncomment when ready) 
         "$timeoutPath" 1h node --max-old-space-size=6000  "$nodeScriptPath" --type "$type" --name "$name" --url "$url" --max "$max" --sheet_id "$sheet_id"  --exclude "$exclude" --strategy "$strategy"
