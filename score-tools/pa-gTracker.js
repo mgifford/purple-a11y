@@ -45,7 +45,7 @@ async function main() {
   const siteName = argv.name;
   const siteUrl = argv.url;
   const maxPages = argv.max;
-  const sheetId = argv.sheet_id;   
+  const spreadsheetId = argv.sheet_id;   
   const exclude = argv.exclude;
   const strategy = argv.strategy;
 
@@ -56,18 +56,13 @@ async function main() {
   // Define the command to run your scan based on the site type and other parameters
   // Removed as I don't think these are working in purple-a11y:  -a none ${exclude ? `--blacklistedPatternsFilename ${exclude}` : ''} 
 
-  let typeOption = `-c 2 -s ${strategy}`;
-  if (siteType === 'sitemap') {
-    typeOption = " -c 1";
-  } 
+  let typeOption = `-c ${siteType === 'sitemap' ? '1' : '2'} -s ${strategy}`;
   const command = `node --max-old-space-size=6000 --no-deprecation purple-a11y/cli.js -u ${siteUrl} ${typeOption} -p ${maxPages} -k "CivicActions gTracker:accessibility@civicactions.com"`;
 
       const startTime = new Date();
 
-      let reportPath = ""; // Reset path for each site
-
       // Ensure each site entry has a dedicated Google Sheet
-      if (!sheetId) {
+      if (!spreadsheetId) {
         const responseSpreadsheet = await sheets.spreadsheets.create({
           resource: {
             properties: {
@@ -76,8 +71,8 @@ async function main() {
           },
           fields: "spreadsheetId",
         });
-        const sheetId = responseSpreadsheet.data.spreadsheetId;
-
+        const newSheetId = responseSpreadsheet.data.spreadsheetId;
+        
         let responseURL = await fetch(siteUrl);
         if (!responseURL) {
           console.error(`Failed to load URL: ${siteUrl}`);
@@ -87,24 +82,21 @@ async function main() {
 
       // Await the completion of the command, including handling retries
       try {
-        console.log(`Command: ${command}`);
-        const output = await runCommandWithTimeout(command, maxPages);
+        // console.log(`Command: ${command}`);
+        const output = await runCommandWithTimeout(command, maxPages, 3, 30000, 720000, siteUrl)
         await new Promise(resolve => setTimeout(resolve, 5000));
       } catch (error) {
         console.error("Command failed after all retries:", error);
         return false;
       }
 
-      insertTodaysDateInSummarySheet(auth, sheetId, siteUrl); // Insert today's date in the Summary sheet
-
       // Process the results and update the Google Sheet
       try {
-
         const reportPath = path.join(RESULTS_DIR, getMostRecentDirectory(siteUrl), "reports", "report.csv");
-
         waitForFile(reportPath);
         fs.exists(reportPath, (exists) => {
           console.log(`${reportPath} ${exists ? 'exists' : 'does not exist'}`);
+          return false;
         });
 
         // Optionally, call prepareDataForUpload if you need to process CSV data
@@ -116,18 +108,20 @@ async function main() {
         // Upload the processed CSV report to the Google Sheet
         await uploadToGoogleSheet(
           auth,
-          sheetId,
+          spreadsheetId,
           processedRecords,
           scanDuration,
         );
         await new Promise(resolve => setTimeout(resolve, 60000));
 
+        insertTodaysDateInSummarySheet(auth, spreadsheetId, siteUrl); // Insert today's date in the Summary sheet
         
-        console.log(`Data uploaded to Google Sheet URL: https://docs.google.com/spreadsheets/d/${sheetId}`);
-        logMemoryUsage();
+        console.log(`Data uploaded to Google Sheet URL: https://docs.google.com/spreadsheets/d/${spreadsheetId}`);
+        // logMemoryUsage();
 
         // Clear processed records to free up memory
         processedRecords = null;
+
       } catch (error) {
         console.error(
           "Error processing and uploading data for URL:",
@@ -135,11 +129,11 @@ async function main() {
           error,
         );
       }
-  
 }
 
 async function authenticateGoogleSheets(credentialsPath) {
   // console.log("Authenticated with Google Sheets API");
+
   // Load client secrets from a local file.
   const content = await fs.promises.readFile(credentialsPath, 'utf8');
   const credentials = JSON.parse(content);
@@ -183,7 +177,7 @@ function getNewToken(oAuth2Client) {
  * @param {number} retryDelay Delay between retries in milliseconds.
  * @param {number} totalTimeout Total timeout for each command execution in milliseconds.
  */
-async function runCommandWithTimeout(command, maxPages, maxAttempts = 3, retryDelay = 30000, totalTimeout = 720000) {
+async function runCommandWithTimeout(command, maxPages, maxAttempts, retryDelay, totalTimeout, siteUrl) {
   let currentPageCount = 0; // Variable to track the highest page number processed
   const parts = command.split(' ');
   const cmd = parts[0];
@@ -218,7 +212,6 @@ async function runCommandWithTimeout(command, maxPages, maxAttempts = 3, retryDe
           // Check if the number of pages processed meets the maximum
           if (currentPageCount >= maxPages) {
               console.log(`Reached maximum page count of ${maxPages}.`);
-              child.kill(); // Terminate the child process early
               resolve();
           }
         });
@@ -246,11 +239,21 @@ async function runCommandWithTimeout(command, maxPages, maxAttempts = 3, retryDe
 
       // Await the command execution
       await commandPromise;
-      if (currentPageCount >= maxPages) break; // Stop attempts if maxPages reached
+
+      // Stop attempts if maxPages reached
+      if (currentPageCount >= maxPages) break; 
       return true;
 
     } catch (error) {
       console.error(`runCommandWithTimeout: Attempt ${attempt} failed: ${error.message}`);
+
+      // Don't retry if the report.csv file exists
+      const reportPath = path.join(RESULTS_DIR, getMostRecentDirectory(siteUrl), "reports", "report.csv");
+      waitForFile(reportPath);
+      fs.exists(reportPath, (exists) => {
+        console.log(`${reportPath} exists and is ready to be uploaded.`);
+        return true;
+      });
 
       if (attempt < maxAttempts) {
         console.log(`Waiting ${retryDelay / 1000} seconds before retrying...`);
@@ -262,14 +265,13 @@ async function runCommandWithTimeout(command, maxPages, maxAttempts = 3, retryDe
   }
 }
 
-
 async function clearSheetContents(sheets, spreadsheetId, sheetName) {
   try {
     await sheets.spreadsheets.values.clear({
       spreadsheetId,
       range: `${sheetName}!A1:Z`,
     });
-    console.log(`Cleared contents of sheet "${sheetName}".`);
+    // console.log(`Cleared contents of sheet "${sheetName}".`);
   } catch (err) {
     console.error(`Error clearing sheet contents: ${err}`);
     throw err; // Rethrow to handle in retry logic
@@ -282,7 +284,7 @@ async function appendDataToSheet(sheets, spreadsheetId, sheetName, data) {
       spreadsheetId,
       range: `${sheetName}!A1`,
       valueInputOption: "USER_ENTERED",
-      resource: { values: data },
+      resource: { values: data },      
     });
     console.log(`Data appended to sheet "${sheetName}" successfully.`);
   } catch (err) {
@@ -291,29 +293,38 @@ async function appendDataToSheet(sheets, spreadsheetId, sheetName, data) {
   }
 }
 
-async function ensureSheetExists(sheets, spreadsheetId, sheetName) {
-  try {
-    const sheetMetadata = await sheets.spreadsheets.get({
-      spreadsheetId,
-      fields: "sheets(properties.title)",
-    });
-    const sheetTitles = sheetMetadata.data.sheets.map(sheet => sheet.properties.title);
+// Look for the sheet and create it if it doesn't exist.
+async function ensureSheetExists(sheets, spreadsheetId, sheetName, index) {
+    try {
+        const sheetMetadata = await sheets.spreadsheets.get({
+            spreadsheetId,
+            fields: 'sheets(properties(title, index))'
+        });
 
-    if (!sheetTitles.includes(sheetName)) {
-      await sheets.spreadsheets.batchUpdate({
-        spreadsheetId,
-        resource: {
-          requests: [{
-            addSheet: { properties: { title: sheetName } }
-          }],
-        },
-      });
-      console.log(`Sheet "${sheetName}" created.`);
+        const exists = sheetMetadata.data.sheets.some(sheet => sheet.properties.title === sheetTitle);
+
+        if (!exists) {
+            await sheets.spreadsheets.batchUpdate({
+                spreadsheetId,
+                resource: {
+                    requests: [{
+                        addSheet: {
+                            properties: {
+                                title: sheetTitle,
+                                index: index // Set index where new sheet should be inserted
+                            }
+                        }
+                    }]
+                }
+            });
+            console.log(`"${sheetTitle}" sheet created at position ${index + 1}.`);
+        } else {
+            console.log(`Sheet "${sheetTitle}" already exists.`);
+        }
+    } catch (error) {
+        console.error(`Error ensuring sheet exists: ${error}`);
+        throw error;
     }
-  } catch (err) {
-    console.error(`Error ensuring sheet exists: ${err}`);
-    throw err; // Rethrow to handle in retry logic
-  }
 }
 
 async function uploadToGoogleSheet(auth, spreadsheetId, processedRecords, scanDuration) {
@@ -323,7 +334,7 @@ async function uploadToGoogleSheet(auth, spreadsheetId, processedRecords, scanDu
 
   try {
     // Ensure the sheet exists, retry on failure
-    await ensureSheetExists(sheets, spreadsheetId, sheetName);
+    await ensureSheetExists(sheets, spreadsheetId, sheetName, 4);
     // Check if clearing is needed then clear contents, retry on failure
     await clearSheetContents(sheets, spreadsheetId, sheetName);
     // Append data to the sheet, retry on failure
@@ -522,7 +533,7 @@ function getMostRecentDirectory(site) {
     .sort((a, b) => b.time - a.time);
 
   if (dirs.length > 0) {
-    console.log(`Most recent directory for site ${site}: ${dirs[0].name}`);
+    // console.log(`Most recent directory for site ${site}: ${dirs[0].name}`);
     return dirs[0].name;
   } else {
     throw new Error("No directories found in basePath");
@@ -686,15 +697,51 @@ async function prepareDataForUpload(filePath, count = 8000) {
   }
 }
 
+
+
+// This function checks if a specific sheet exists, and creates it if not 
+// It is a near duplicate of the ensureSheetExists function which occurs inside another function
+async function ensureSheetExists(sheets, spreadsheetId, sheetTitle, index) {
+    try {
+      const sheetMetadata = await sheets.spreadsheets.get({
+        spreadsheetId,
+        fields: 'sheets(properties/title)',
+      });
+  
+      const sheetExists = sheetMetadata.data.sheets.some(sheet => sheet.properties.title === sheetTitle);
+  
+      if (!sheetExists) {
+        await sheets.spreadsheets.batchUpdate({
+          spreadsheetId,
+          resource: {
+            requests: [{
+              addSheet: {
+                properties: {
+                    title: sheetTitle,
+                    index: index // Ensure this is a valid index
+                }
+              },
+            }],
+          },
+        });
+        console.log(`"${sheetTitle}" sheet did not exist and was created.`);
+      }
+    } catch (error) {
+      console.error(`Error ensuring "${sheetTitle}" sheet exists:`, error);
+      throw error; // Rethrow to handle it in the calling function
+    }
+}
+
+
 // Inserts today's date into the last cell of the "Summary" sheet
 async function insertTodaysDateInSummarySheet(auth, spreadsheetId, url) {
-  console.log(`insertTodaysDateInSummarySheet: Inserting today's date for URL: ${url}`);
+  // console.log(`insertTodaysDateInSummarySheet: Inserting today's date for URL: ${url}`);
 
   const sheets = google.sheets({version: "v4", auth});
 
   try {
     // First, ensure that the "Summary" sheet exists
-    await ensureSheetExists(sheets, spreadsheetId, "Summary");
+    await ensureSheetExists(sheets, spreadsheetId, "Summary", 1);
 
     // Then, attempt to fetch the range to check if today's date already exists
     const range = "Summary!A:A";
@@ -707,7 +754,7 @@ async function insertTodaysDateInSummarySheet(auth, spreadsheetId, url) {
     // Check if formattedDate already exists in column A
     const existingDates = result.data.values ? result.data.values.flat() : [];
     if (existingDates.includes(formattedDate)) {
-      console.log(`Today's date (${formattedDate}) already exists in the Summary sheet for ${url}.`);
+      // console.log(`Today's date (${formattedDate}) exists in Summary sheet for ${url}`);
       return; // Skip insertion since the date already exists
     }
 
@@ -724,39 +771,10 @@ async function insertTodaysDateInSummarySheet(auth, spreadsheetId, url) {
       },
     });
 
-    console.log(`Inserted today's date (${formattedDate}) into the first empty row of the Summary sheet for ${url}.`);
+    console.log(`Inserted (${formattedDate}) into 1st empty row of the Summary sheet: ${url}`);
     logMemoryUsage();
   } catch (err) {
-    console.error("insertTodaysDateInSummarySheet: Error inserting today's date into the Summary sheet:", err);
-  }
-}
-
-// This function checks if a specific sheet exists, and creates it if not
-async function ensureSheetExists(sheets, spreadsheetId, sheetTitle) {
-  try {
-    const sheetMetadata = await sheets.spreadsheets.get({
-      spreadsheetId,
-      fields: 'sheets(properties/title)',
-    });
-
-    const sheetExists = sheetMetadata.data.sheets.some(sheet => sheet.properties.title === sheetTitle);
-
-    if (!sheetExists) {
-      await sheets.spreadsheets.batchUpdate({
-        spreadsheetId,
-        resource: {
-          requests: [{
-            addSheet: {
-              properties: { title: sheetTitle },
-            },
-          }],
-        },
-      });
-      console.log(`"${sheetTitle}" sheet did not exist and was created.`);
-    }
-  } catch (error) {
-    console.error(`Error ensuring "${sheetTitle}" sheet exists:`, error);
-    throw error; // Rethrow to handle it in the calling function
+    console.error("insertTodaysDateInSummarySheet: Error inserting today's date into the Summary sheet: ", err);
   }
 }
 
@@ -783,3 +801,4 @@ function waitForFile(filePath, timeout = 3000) {
     checkFile();
   });
 }
+
