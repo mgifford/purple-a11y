@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Path to your Node.js script
-nodeScriptPath="./pa-gTracker-earlier.js"
+nodeScriptPath="./pa-gTracker.js"
 
 # Path to default YAML configuration file & some executables
 yamlConfigPath="./pa-gTracker.yml"
