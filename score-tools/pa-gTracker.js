@@ -8,7 +8,6 @@ const { hideBin } = require("yargs/helpers");
 const fsPromises = require("fs").promises;
 const crypto = require("crypto");
 
-
 const util = require('util');
 // const execPromise = util.promisify(exec);
 const { parse } = require("csv-parse");
@@ -20,6 +19,7 @@ const { JSDOM } = require("jsdom");
 // const { exec } = require('child_process');
 const { spawn } = require('child_process');
 const baseDir = path.resolve(__dirname);
+const lockFilePath = path.join(__dirname, 'scan.lock');
 
 const RESULTS_DIR = path.join(baseDir, "results");
 const TOKEN_PATH = path.join(baseDir, "token.json");
@@ -36,7 +36,15 @@ const argv = yargs(hideBin(process.argv)).options({
   strategy: { type: 'string', demandOption: true, default: 'same-hostname'},
 }).argv; 
 
+removeLock(); // Ensure the lock is removed before starting
+
 async function main() {
+  if (await isLocked()) {
+    console.log('A scan is already in progress. Exiting...');
+    return;
+  }
+  await setLock();
+
   // Authenticate with Google Sheets API
   const auth = await authenticateGoogleSheets(CREDENTIALS_PATH);
 
@@ -83,44 +91,45 @@ async function main() {
       // Await the completion of the command, including handling retries
       try {
         // console.log(`Command: ${command}`);
-        const output = await runCommandWithTimeout(command, maxPages, 3, 30000, 720000, siteUrl)
+        const output = await runCommandWithTimeout(command, maxPages, 1, 30000, 3600000, siteUrl)
         await new Promise(resolve => setTimeout(resolve, 5000));
       } catch (error) {
         console.error("Command failed after all retries:", error);
         return false;
       }
 
-      // Process the results and update the Google Sheet
+    // Assuming `getMostRecentDirectory` is meant to check within the results directory
       try {
-        const reportPath = path.join(RESULTS_DIR, getMostRecentDirectory(siteUrl), "reports", "report.csv");
+        const mostRecentDir = getMostRecentDirectory(RESULTS_DIR);
+        const reportPath = path.join(RESULTS_DIR, mostRecentDir, "reports", "report.csv");
+
         waitForFile(reportPath);
-        fs.exists(reportPath, (exists) => {
-          console.log(`${reportPath} ${exists ? 'exists' : 'does not exist'}`);
-          return false;
+        fs.exists(reportPath, async (exists) => {
+          if (exists) {
+            console.log(`${reportPath} exists (main), preparing data for upload.`);
+            // Replace the existing CSV processing call with the new function
+            await parseAndUploadResults(reportPath, auth, spreadsheetId, startTime);
+          } else {
+            console.log(`${reportPath} does not exist.`);
+          }
         });
 
         // Optionally, call prepareDataForUpload if you need to process CSV data
+        console.log(`Preparing data for upload from: ${reportPath}`);
         let processedRecords = await prepareDataForUpload(reportPath);
+
         const endTime = new Date();
         const scanDuration = formatDuration((endTime - startTime) / 1000); // Duration in seconds
         console.log(`\n\nScan Duration: (${scanDuration})\n`);
 
         // Upload the processed CSV report to the Google Sheet
-        await uploadToGoogleSheet(
-          auth,
-          spreadsheetId,
-          processedRecords,
-          scanDuration,
-        );
-        await new Promise(resolve => setTimeout(resolve, 60000));
-
+        await uploadToGoogleSheet(auth, spreadsheetId, processedRecords, scanDuration);
         insertTodaysDateInSummarySheet(auth, spreadsheetId, siteUrl); // Insert today's date in the Summary sheet
+
+        await new Promise(resolve => setTimeout(resolve, 60000)); // Wait 60 seconds before continuing
         
         console.log(`Data uploaded to Google Sheet URL: https://docs.google.com/spreadsheets/d/${spreadsheetId}`);
-        // logMemoryUsage();
-
-        // Clear processed records to free up memory
-        processedRecords = null;
+        processedRecords = null; // Clear processed records to free up memory
 
       } catch (error) {
         console.error(
@@ -128,6 +137,10 @@ async function main() {
           siteUrl,
           error,
         );
+      } finally {
+        console.log(`Scan for ${siteName} completed.`);
+        await removeLock();  // Ensure lock is removed before exiting
+        process.exit(0); // Successfully exit
       }
 }
 
@@ -160,14 +173,15 @@ function getNewToken(oAuth2Client) {
   console.log('Authorize this app by visiting this URL:', authUrl);
   // Further implementation needed to handle the new token
   // Typically involves a web server to receive the response
+
+  // Handle errors
+  try {
+    // Code that may throw an error
+  } catch (error) {
+    console.error('Error:', error);
+    // Handle the error appropriately
+  }
 }
-
-
-// Call the main function to start the script
-// main().catch(console.error);
-
-
-
 
 
 /**
@@ -178,92 +192,125 @@ function getNewToken(oAuth2Client) {
  * @param {number} totalTimeout Total timeout for each command execution in milliseconds.
  */
 async function runCommandWithTimeout(command, maxPages, maxAttempts, retryDelay, totalTimeout, siteUrl) {
-  let currentPageCount = 0; // Variable to track the highest page number processed
+  let currentPageCount = 0;
+  let attempt = 0;
   const parts = command.split(' ');
   const cmd = parts[0];
   const args = parts.slice(1);
 
-  let attempt = 0;
+  // console.log(`Preparing to execute: ${cmd} with args ${args.join(' ')}`);
 
   while (attempt < maxAttempts) {
-    attempt++;
-    try {
-      console.log(`Attempt ${attempt}: Executing command: ${command}`);
-      let stdout = ''; // Reset stdout content for each attempt
-      let stderr = ''; // Reset stderr content for each attempt
+      attempt++;
+      console.log(`Attempt ${attempt}: Executing command: ${cmd} ${args.join(' ')}`);
+      try {
+          const { stdout, stderr } = await executeCommand(cmd, args, totalTimeout);
+          console.log(`Command stdout: ${stdout}`);
+          if (stderr) console.error(`Command stderr: ${stderr}`);
 
-      // Create a promise for the command execution
-      const commandPromise = new Promise((resolve, reject) => {
-        const child = spawn(cmd, args, { shell: true });
+          // Here you would call a function to process `stdout` to count pages or handle the output
+          // e.g., currentPageCount = processStdOut(stdout, currentPageCount);
 
-        // Handle stdout data
-        child.stdout.on('data', (data) => {
-          stdout += data.toString();
-          console.log(data.toString()); // Log real-time output
-
-          // Parse output line by line and check for "Results directory is at"
-          const lines = stdout.split('\n');
-          lines.forEach(line => {
-              if (line.includes('Scan Summary')) {
-                  return true; // Report has finished, return from the function
-              }
-          });
-
-          // Check if the number of pages processed meets the maximum
           if (currentPageCount >= maxPages) {
-              console.log(`Reached maximum page count of ${maxPages}.`);
-              resolve();
+              console.log(`Reached the page limit of ${maxPages}, stopping.`);
+              break;
           }
-        });
-
-        // Handle stderr data
-        child.stderr.on('data', (data) => {
-          stderr += data.toString(); // Convert data to string and append to stderr
-        });
-
-        // Handle process exit
-        child.on('exit', (code) => {
-          if (code === 0) {
-              resolve(stdout); // Resolve with output on successful exit
-          } else {
-              reject(new Error(`Command failed with exit code ${code}: ${command}`));
-          }
-        });
-
-        // Set timeout for the command execution
-        setTimeout(() => {
-            child.kill(); // Ensure to kill the process if timeout
-            reject(new Error(`Command timed out after ${totalTimeout} milliseconds: ${command}`));
-        }, totalTimeout);
-      });
-
-      // Await the command execution
-      await commandPromise;
-
-      // Stop attempts if maxPages reached
-      if (currentPageCount >= maxPages) break; 
-      return true;
-
-    } catch (error) {
-      console.error(`runCommandWithTimeout: Attempt ${attempt} failed: ${error.message}`);
-
-      // Don't retry if the report.csv file exists
-      const reportPath = path.join(RESULTS_DIR, getMostRecentDirectory(siteUrl), "reports", "report.csv");
-      waitForFile(reportPath);
-      fs.exists(reportPath, (exists) => {
-        console.log(`${reportPath} exists and is ready to be uploaded.`);
-        return true;
-      });
-
-      if (attempt < maxAttempts) {
-        console.log(`Waiting ${retryDelay / 1000} seconds before retrying...`);
-        await new Promise(resolve => setTimeout(resolve, retryDelay));
-      } else {
-        throw error;
+      } catch (error) {
+        console.error(`Attempt ${attempt} failed with error: ${error.message}`);
+        if (attempt >= maxAttempts) {
+          console.error("All attempts failed, exiting.");
+          throw error;
+        }
+      } finally {
+        console.log(`Removing lock after attempt ${attempt}`);
+        await removeLock(); // Ensure lock is always removed
       }
-    }
+      await new Promise(resolve => setTimeout(resolve, retryDelay));
   }
 }
+
+async function executeCommand(cmd, args, totalTimeout) {
+  return new Promise((resolve, reject) => {
+      const child = spawn(cmd, args, { shell: true });
+      let stdout = '';
+      let stderr = '';
+
+      child.stdout.on('data', data => {
+          stdout += data.toString();
+          console.log('', data.toString()); // Log output immediately for debugging
+      });
+
+      child.stderr.on('data', data => {
+          stderr += data.toString();
+          console.log('STDERR:', data.toString()); // Log errors immediately for debugging
+      });
+
+      child.on('close', code => {
+          if (code === 0) {
+              resolve({ stdout, stderr });
+          } else {
+              reject(new Error(`Command failed with exit code ${code}: ${stderr}`));
+          }
+      });
+
+      // Timeout to kill the process if it runs too long
+      setTimeout(() => {
+          child.kill('SIGTERM'); // Ensure to terminate the process
+          reject(new Error(`Command timeout after ${totalTimeout} ms: ${stderr}`)); // Include stderr even in timeout
+      }, totalTimeout);
+  });
+}
+
+
+// Example output processor that can decide to resolve early
+function outputProcessor(output, resolve) {
+  if (output.includes('Scan Summary')) {
+      console.log("Scan Summary Detected, finishing early");
+      resolve(); // Resolve the command execution early based on specific output
+  }
+  // Additional checks like page count could be integrated here
+}
+
+
+// Function to parse CSV and upload results in chunks
+async function parseAndUploadResults(filePath, auth, spreadsheetId, startTime) {
+  try {
+      // Read the CSV file and parse it
+      console.log(`parseAndUploadResults -  Parsing CSV file: ${filePath}`);
+      const chunkSize = 500; // Define the chunk size for uploading
+      const fileContent = await fsPromises.readFile(filePath, 'utf8'); 
+      const records = await parseCSV(filePath); // Ensure this returns the parsed data
+      const today = new Date();
+      const sheetName = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, "0")}-${today.getDate().toString().padStart(2, "0")}`;
+    
+      if (records.length > 10) {
+        const sheets = google.sheets({version: "v4", auth});
+        // Ensure the sheet exists, retry on failure
+        await ensureSheetExists(sheets, spreadsheetId, sheetName, 4);
+        // Check if clearing is needed then clear contents, retry on failure
+        await clearSheetContents(sheets, spreadsheetId, sheetName);
+      }
+
+      for (let i = 0; i < records.length; i += chunkSize) {
+          console.log(`Uploading chunk ${i / chunkSize + 1} of ${Math.ceil(records.length / chunkSize)} - ${records.length}`);
+          const chunk = records.slice(i, i + chunkSize);
+
+          // Upload each chunk to Google Sheets
+          await uploadToGoogleSheet(auth, spreadsheetId, chunk, formatDuration(new Date() - startTime));
+          console.log(`Uploaded chunk ${i / chunkSize + 1} to Google Sheets`);
+      }
+  } catch (error) {
+      console.error('Failed to parse and upload CSV:', error);
+  }
+}
+
+
+function chunk(array, size) {
+  return Array.from({ length: Math.ceil(array.length / size) }, (v, i) =>
+      array.slice(i * size, i * size + size)
+  );
+}
+
 
 async function clearSheetContents(sheets, spreadsheetId, sheetName) {
   try {
@@ -271,24 +318,9 @@ async function clearSheetContents(sheets, spreadsheetId, sheetName) {
       spreadsheetId,
       range: `${sheetName}!A1:Z`,
     });
-    // console.log(`Cleared contents of sheet "${sheetName}".`);
+    console.log(`Cleared contents of sheet "${sheetName}".`);
   } catch (err) {
     console.error(`Error clearing sheet contents: ${err}`);
-    throw err; // Rethrow to handle in retry logic
-  }
-}
-
-async function appendDataToSheet(sheets, spreadsheetId, sheetName, data) {
-  try {
-    await sheets.spreadsheets.values.append({
-      spreadsheetId,
-      range: `${sheetName}!A1`,
-      valueInputOption: "USER_ENTERED",
-      resource: { values: data },      
-    });
-    console.log(`Data appended to sheet "${sheetName}" successfully.`);
-  } catch (err) {
-    console.error(`Error appending data to sheet: ${err}`);
     throw err; // Rethrow to handle in retry logic
   }
 }
@@ -327,16 +359,18 @@ async function ensureSheetExists(sheets, spreadsheetId, sheetName, index) {
     }
 }
 
+
 async function uploadToGoogleSheet(auth, spreadsheetId, processedRecords, scanDuration) {
-  const sheets = google.sheets({version: "v4", auth});
+  const sheets = google.sheets({ version: "v4", auth });
   const today = new Date();
   const sheetName = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, "0")}-${today.getDate().toString().padStart(2, "0")}`;
 
   try {
-    // Ensure the sheet exists, retry on failure
-    await ensureSheetExists(sheets, spreadsheetId, sheetName, 4);
-    // Check if clearing is needed then clear contents, retry on failure
-    await clearSheetContents(sheets, spreadsheetId, sheetName);
+    const range = `${sheetName}!A1`;
+
+    // Log the range to verify its format
+    console.log(`Uploading data to range: ${range}`);
+
     // Append data to the sheet, retry on failure
     await appendDataToSheet(sheets, spreadsheetId, sheetName, [
       // Header row
@@ -360,107 +394,39 @@ async function uploadToGoogleSheet(auth, spreadsheetId, processedRecords, scanDu
   }
 }
 
-
-
-
-
-
-
-/*
-async function uploadToGoogleSheet(auth, spreadsheetId, processedRecords, scanDuration) {
-  console.log("uploadToGoogleSheet: Starting upload to Google Sheet");
-  const sheets = google.sheets({version: "v4", auth});
+async function appendDataToSheet(sheets, spreadsheetId, sheetName, data) {
+  let range;
   try {
-    // Define your headers here -- MAKE THIS ORDER MAKE SENSE
-    const headers = [
-      "URL",
-      "axe Impact",
-      "Severity",
-      "Issue ID",
-      "WCAG Conformance",
-      "Context",
-      "HTML Fingerprint",
-      "XPath",
-      "Hash Context",
-      "Hash xPath",
-    ];
+    // Correctly format the sheet name to handle date-like names
+    range = `${sheetName}!A1`;
 
-    const values = processedRecords.map((record) => [
-      record.url,
-      record.axeImpact,
-      record.severity,
-      record.issueId,
-      record.wcagConformance,
-      record.context,
-      record.htmlFingerprint,
-      record.xpath,
-      record.md5Hashcontext,
-      record.md5Hashxpath,
-    ]);
+    // Log the range and data length for debugging
+    console.log(`Appending data to range: ${range}`);
+    console.log(`Data length: ${data.length}`);
 
-    // Prepend headers to the values array
-    values.unshift(headers);
-
-    // Construct the sheet name based on today's date
-    const today = new Date();
-    const sheetName = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, "0")}-${today.getDate().toString().padStart(2, "0")}`;
-
-    // Check if the sheet exists, and if not, create it
-    const sheetMetadata = await sheets.spreadsheets.get({
-      spreadsheetId,
-      fields: "sheets(properties.title)",
-    });
-
-    const existingSheetTitles = sheetMetadata.data.sheets.map(
-      (sheet) => sheet.properties.title,
-    );
-    if (existingSheetTitles.includes(sheetName)) {
-      // Clear the existing sheet contents
-      await sheets.spreadsheets.values.clear({
-      spreadsheetId,
-      range: `${sheetName}!A1:Z`,
-      });
-    }
-    const sheetTitles = sheetMetadata.data.sheets.map(
-      (sheet) => sheet.properties.title,
-    );
-
-    if (!sheetTitles.includes(sheetName)) {
-      await sheets.spreadsheets.batchUpdate({
-        spreadsheetId,
-        resource: {
-          requests: [
-            {
-              addSheet: {
-                properties: {
-                  title: sheetName,
-                },
-              },
-            },
-          ],
-        },
-      });
-    }
-
-    // Append the data to the sheet
     await sheets.spreadsheets.values.append({
       spreadsheetId,
-      range: `${sheetName}!A1`,
+      range: range,
       valueInputOption: "USER_ENTERED",
-      resource: {
-        values,
-      },
+      resource: { values: data },
     });
-    console.log(`Uploaded data to '${sheetName}' in spreadsheet: ${spreadsheetId}`);
-    logMemoryUsage();
+    console.log(`Data appended to sheet "${sheetName}" successfully.`);
   } catch (err) {
-    console.error("uploadToGoogleSheet: Error uploading data to Google Sheets:", err);
+    console.error(`Error appending data to sheet ${range}: ${err.message}`);
+    console.error(`Stack trace: ${err.stack}`);
+    if (range) {
+      console.error(`The range was defined as: ${range}`);
+    } else {
+      console.error(`The range variable was not defined.`);
+    }
+    console.error(`Spreadsheet ID: ${spreadsheetId}`);
+    console.error(`Sheet Name: ${sheetName}`);
+    console.error(`Data: ${JSON.stringify(data)}`);
+    throw err; // Rethrow to handle in retry logic
   }
-
-  processedRecords = null; // Clear the processed records to free up memory
 }
 
-*/
+
 
 // Authentication
 
@@ -477,6 +443,7 @@ function authorize(credentials, callback) {
   );
 
   // Check if we have previously stored a token.
+  console.log("Reading token from:", TOKEN_PATH);
   fs.readFile(TOKEN_PATH, (err, token) => {
     if (err) {
       return getNewToken(oAuth2Client, callback);
@@ -504,6 +471,8 @@ function getNewToken(oAuth2Client, callback) {
     oAuth2Client.getToken(code, (err, token) => {
       if (err) return console.error("Error retrieving access token", err);
       oAuth2Client.setCredentials(token);
+
+      console.log("Token stored to", TOKEN_PATH);
       fs.writeFile(TOKEN_PATH, JSON.stringify(token), (err) => {
         if (err) return console.error(err);
         console.log("Token stored to", TOKEN_PATH);
@@ -521,24 +490,50 @@ fs.readFile(CREDENTIALS_PATH, (err, content) => {
   authorize(JSON.parse(content), main);
 });
 
-
-function getMostRecentDirectory(site) {
-  const dirs = fs
-    .readdirSync(RESULTS_DIR, { withFileTypes: true })
+function getMostRecentDirectory(basePath, timeWindow = 300000) { // 5 minutes window by default
+  const currentTime = Date.now(); // Get the current time inside the function
+  const directories = fs.readdirSync(basePath, { withFileTypes: true })
     .filter(dirent => dirent.isDirectory())
-    .map(dirent => ({
-      name: dirent.name,
-      time: fs.statSync(path.join(RESULTS_DIR, dirent.name)).mtime.getTime(),
-    }))
-    .sort((a, b) => b.time - a.time);
+    .map(dirent => {
+        const dirPath = path.join(basePath, dirent.name);
+        const stat = fs.statSync(dirPath);
+        return { name: dirent.name, time: stat.mtime.getTime() };
+    })
+    .filter(dir => currentTime - dir.time < timeWindow) // Filter out directories older than the time window
+    .sort((a, b) => b.time - a.time); // Sort directories by modified time in descending order
 
-  if (dirs.length > 0) {
-    // console.log(`Most recent directory for site ${site}: ${dirs[0].name}`);
-    return dirs[0].name;
+  if (directories.length > 0) {
+    console.log(`Most recent directory within time window: ${directories[0].name}`);
+    return directories[0].name;
   } else {
-    throw new Error("No directories found in basePath");
+    throw new Error("No recent directories found in the specified path.");
   }
 }
+
+
+
+const renameAndPrepareHtmlFiles = async (baseDir, siteUrl) => {
+  const currentDate = new Date().toISOString().split('T')[0]; // Format as YYYY-MM-DD
+  const domain = new URL(siteUrl).hostname;
+  const sourceDir = path.join(baseDir, getMostRecentDirectory(siteUrl), 'reports');
+
+  const htmlFiles = ['report.html', 'summary.html'];
+
+  try {
+    for (let fileName of htmlFiles) {
+      const oldPath = path.join(sourceDir, fileName);
+      const newName = `${domain}_${currentDate}_${fileName}`;
+      const newPath = path.join(sourceDir, newName);
+      await fsPromises.rename(oldPath, newPath);
+      console.log(`Renamed ${fileName} to ${newName}`);
+    }
+  } catch (error) {
+    console.error('Failed to rename HTML files:', error);
+    throw error;
+  }
+}
+
+
 
 /*
 function saveConfig(config) {
@@ -552,13 +547,6 @@ function saveConfig(config) {
 */
 
 // Utility Functions
-
-function generateMD5Hash(input) {
-  const hash = crypto.createHash("md5").update(input).digest("hex");
-  // Convert the first 8 characters (which represent 32 bits) to a decimal number
-  const numericalHash = parseInt(hash.substring(0, 8), 16);
-  return numericalHash;
-}
 
 function formatDuration(durationInSeconds) {
   const hours = Math.floor(durationInSeconds / 3600);
@@ -582,25 +570,24 @@ function formatDuration(durationInSeconds) {
   return result.join(" ");
 }
 
+
 // Helper function to parse CSV data asynchronously
-async function parseCSV(data) {
+function parseCSV(filePath) {
   return new Promise((resolve, reject) => {
-    parse(
-      data,
-      {
+    const results = [];
+    fs.createReadStream(filePath)
+      .pipe(parse({
         columns: true,
-        skip_empty_lines: true,
-      },
-      (err, output) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(output);
-        }
-      },
-    );
+        delimiter: ',',
+        trim: true,
+        skip_empty_lines: true
+      }))
+      .on('error', error => reject(error))
+      .on('data', row => results.push(row))
+      .on('end', () => resolve(results));  // Resolve with all records
   });
 }
+
 
 /**
  * Cleans a cell by removing unnecessary quotes and trimming spaces.
@@ -614,40 +601,61 @@ function cleanCell(cell) {
   return cleanedCell;
 }
 
+
 function sanitizeHtml(html) {
+  if (!html) {
+      console.error("sanitizeHtml received empty or invalid HTML");
+      return ""; // Return empty string for invalid input
+  }
+
   const dom = new JSDOM(html);
   const document = dom.window.document;
 
   // Remove unwanted attributes and text nodes
   function cleanse(node) {
-    node.querySelectorAll("*").forEach((el) => {
-      el.removeAttribute("title");
-      el.removeAttribute("href");
-      // If you need to remove any other attributes, do it here.
-      if (el.hasChildNodes()) {
-        el.childNodes.forEach((child) => {
-          if (child.nodeType === dom.window.Node.TEXT_NODE) {
-            // Replace nbsp and other HTML entities
-            const textContent = child.textContent
-              .replace(/&nbsp;|[\u00A0]/g, "")
-              .trim();
-            if (textContent === "") {
-              child.remove();
-            } else {
-              child.textContent = " ";
-            }
-          } else if (child.nodeType === dom.window.Node.ELEMENT_NODE) {
-            cleanse(child);
+      node.querySelectorAll("*").forEach((el) => {
+          el.removeAttribute("title");
+          el.removeAttribute("href");
+          // If you need to remove any other attributes, do it here.
+          if (el.hasChildNodes()) {
+              el.childNodes.forEach((child) => {
+                  if (child.nodeType === dom.window.Node.TEXT_NODE) {
+                      // Replace nbsp and other HTML entities
+                      const textContent = child.textContent
+                          .replace(/&nbsp;|[\u00A0]/g, "")
+                          .trim();
+                      if (textContent === "") {
+                          child.remove();
+                      } else {
+                          child.textContent = " ";
+                      }
+                  } else if (child.nodeType === dom.window.Node.ELEMENT_NODE) {
+                      cleanse(child);
+                  }
+              });
           }
-        });
-      }
-    });
+      });
   }
 
   cleanse(document.body);
 
   return document.body.innerHTML;
 }
+
+function generateMD5Hash(input) {
+  if (!input) {
+      console.error("generateMD5Hash received empty or invalid input");
+      return ""; // Return empty string for invalid input
+  }
+
+  const hash = crypto.createHash("md5").update(input).digest("hex");
+  // Convert the first 8 characters (which represent 32 bits) to a decimal number
+  const numericalHash = parseInt(hash.substring(0, 8), 16);
+  process.stdout.write('*'); // Log a character for each hash generated
+  return numericalHash;
+}
+
+
 
 function formatWcagCriteria(criteria) {
   // Check if the value contains the string "wcag"
@@ -666,34 +674,58 @@ function formatWcagCriteria(criteria) {
 }
 
 
-// Do what is needed to prepare the data for upload, limit results to 8000 by default
-async function prepareDataForUpload(filePath, count = 8000) {
+async function prepareDataForUpload(filePath, count = 10000) {
   try {
-    const fileContent = await fsPromises.readFile(filePath, "utf8");
-    const records = await parseCSV(fileContent);
-    
-    // Filter and prioritize the records
-    const mustFix = records.filter(record => record.severity === 'mustFix');
-    const goodToFix = records.filter(record => record.severity === 'goodToFix');
-    const needsReview = records.filter(record => record.severity === 'needsReview');
-    
-    const prioritizedRecords = [...mustFix, ...goodToFix, ...needsReview];
-    
-    return prioritizedRecords.slice(0, count).map(record => ({
-      url: record.url,
-      axeImpact: record.axeImpact,
-      severity: record.severity,
-      issueId: record.issueId,
-      wcagConformance: formatWcagCriteria(record.wcagConformance),
-      context: record.context,
-      htmlFingerprint: sanitizeHtml(record.context),
-      xpath: record.xpath,
-      md5Hashcontext: generateMD5Hash(`${record.url}${record.context}`),
-      md5Hashxpath: generateMD5Hash(`${record.url}${record.xpath}`),
-    }));
+      console.log(`prepareDataForUpload - Preparing data for upload from: ${filePath}`);
+      const fileContent = await fsPromises.readFile(filePath, "utf8"); // Read file content
+      const records = await parseCSV(filePath); // Ensure parseCSV actually returns records
+
+      // Check if records is not undefined and is an array
+      if (!Array.isArray(records) || records.length === 0) {
+          console.error("No records found or records are not in expected format");
+          return [];
+      }
+
+      const mustFix = records.filter(record => record.severity === 'mustFix');
+      const goodToFix = records.filter(record => record.severity === 'goodToFix');
+      const needsReview = records.filter(record => record.severity === 'needsReview');
+
+      const prioritizedRecords = [...mustFix, ...goodToFix, ...needsReview];
+
+      return prioritizedRecords.slice(0, count).map(record => {
+          const context = record.context;
+          const sanitizedHtml = sanitizeHtml(context);
+          const md5HashContext = generateMD5Hash(`${record.url}${context}`);
+          const md5HashXpath = generateMD5Hash(`${record.url}${record.xpath}`);
+
+          // Logging the values for debugging
+          // console.log(`Processing record: URL=${record.url}, context=${context}`);
+          if (!sanitizedHtml) {
+              console.log(`Empty sanitized HTML: ${context}`);
+              console.error("Empty context found for record:", record);
+          }
+          if (!md5HashContext) {
+              console.log(`Empty MD5 Hash: ${record.url} ${context}`);
+               // console.log(`MD5 Hash Xpath: ${md5HashXpath}`);
+              console.error("Empty MD5 hash for context:", context);
+          }
+
+          return {
+              url: record.url,
+              axeImpact: record.axeImpact,
+              severity: record.severity,
+              issueId: record.issueId,
+              wcagConformance: formatWcagCriteria(record.wcagConformance),
+              context: context,
+              htmlFingerprint: sanitizedHtml,
+              xpath: record.xpath,
+              md5Hashcontext: md5HashContext,
+              md5Hashxpath: md5HashXpath,
+          };
+      });
   } catch (error) {
-    console.error("Error preparing data for upload:", error);
-    throw error;
+      console.error("Error preparing data for upload (prepareDataForUpload):", error);
+      throw error;
   }
 }
 
@@ -733,9 +765,54 @@ async function ensureSheetExists(sheets, spreadsheetId, sheetTitle, index) {
 }
 
 
+function setLock() {
+  return new Promise((resolve, reject) => {
+    fs.open(lockFilePath, 'wx', (err, fd) => {
+      if (err) {
+        if (err.code === 'EEXIST') return reject(new Error('Lock file already exists'));
+        return reject(err);
+      }
+      fs.close(fd, (err) => {
+        if (err) return reject(err);
+        resolve();
+      });
+    });
+  });
+}
+
+function removeLock() {
+  return fs.promises.access(lockFilePath, fs.constants.F_OK)
+    .then(() => {
+      return fs.promises.unlink(lockFilePath);
+    })
+    .catch(err => {
+      if (err.code === 'ENOENT') {
+        // If no such file, it's already removed, so resolve normally
+        console.log('No lock file to remove.');
+        return;
+      } else {
+        console.error('Unexpected error accessing lock file:', err);
+        throw err;
+        return;
+      }
+    });
+}
+
+
+function isLocked() {
+  return fs.promises.access(lockFilePath, fs.constants.F_OK)
+    .then(() => true)
+    .catch(err => {
+      if (err.code === 'ENOENT') return false;
+      throw err;
+    });
+}
+
+
+
 // Inserts today's date into the last cell of the "Summary" sheet
 async function insertTodaysDateInSummarySheet(auth, spreadsheetId, url) {
-  // console.log(`insertTodaysDateInSummarySheet: Inserting today's date for URL: ${url}`);
+  console.log(`insertTodaysDateInSummarySheet: Inserting today's date for URL: ${url}`);
 
   const sheets = google.sheets({version: "v4", auth});
 
@@ -750,11 +827,12 @@ async function insertTodaysDateInSummarySheet(auth, spreadsheetId, url) {
     // Format today's date as YYYY-MM-DD
     const today = new Date();
     const formattedDate = today.toISOString().split("T")[0];
+    console.log(`Today's date: ${formattedDate}`);
 
     // Check if formattedDate already exists in column A
     const existingDates = result.data.values ? result.data.values.flat() : [];
     if (existingDates.includes(formattedDate)) {
-      // console.log(`Today's date (${formattedDate}) exists in Summary sheet for ${url}`);
+      console.log(`Today's date (${formattedDate}) exists in Summary sheet for ${url}`);
       return; // Skip insertion since the date already exists
     }
 
@@ -788,6 +866,7 @@ function logMemoryUsage() {
 
 // Utility function to wait for a file to exist before proceeding
 function waitForFile(filePath, timeout = 3000) {
+  console.log(`Waiting for file: ${filePath}`);
   return new Promise((resolve, reject) => {
     const checkFile = () => {
       fs.access(filePath, fs.constants.F_OK, (err) => {
