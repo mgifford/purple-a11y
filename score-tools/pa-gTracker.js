@@ -443,7 +443,7 @@ function authorize(credentials, callback) {
   );
 
   // Check if we have previously stored a token.
-  console.log("Reading token from:", TOKEN_PATH);
+  // console.log("Reading token from:", TOKEN_PATH);
   fs.readFile(TOKEN_PATH, (err, token) => {
     if (err) {
       return getNewToken(oAuth2Client, callback);
@@ -611,24 +611,23 @@ function sanitizeHtml(html) {
   const dom = new JSDOM(html);
   const document = dom.window.document;
 
-  // Remove unwanted attributes and text nodes
+  // Only remove specific unwanted attributes and preserve more structure
   function cleanse(node) {
       node.querySelectorAll("*").forEach((el) => {
-          el.removeAttribute("title");
-          el.removeAttribute("href");
-          // If you need to remove any other attributes, do it here.
+          // Remove only specific attributes known to be unnecessary
+          ['style', 'onclick', 'onmouseover'].forEach(attr => el.removeAttribute(attr));
+
+          // Optionally remove elements by tag name if necessary, e.g., <script>, <style>
+          if (el.tagName.toLowerCase() === 'script' || el.tagName.toLowerCase() === 'style') {
+              el.remove();
+          }
+
           if (el.hasChildNodes()) {
               el.childNodes.forEach((child) => {
                   if (child.nodeType === dom.window.Node.TEXT_NODE) {
-                      // Replace nbsp and other HTML entities
-                      const textContent = child.textContent
-                          .replace(/&nbsp;|[\u00A0]/g, "")
-                          .trim();
-                      if (textContent === "") {
-                          child.remove();
-                      } else {
-                          child.textContent = " ";
-                      }
+                      // Simplify text handling: only trim and replace known problematic entities
+                      const textContent = child.textContent.replace(/&nbsp;|[\u00A0]/g, " ").trim();
+                      child.textContent = textContent;
                   } else if (child.nodeType === dom.window.Node.ELEMENT_NODE) {
                       cleanse(child);
                   }
@@ -639,8 +638,11 @@ function sanitizeHtml(html) {
 
   cleanse(document.body);
 
-  return document.body.innerHTML;
+  // Return the sanitized inner HTML of the body
+  return document.body.innerHTML.trim(); // Ensure it's trimmed to avoid returning only whitespace
 }
+
+
 
 function generateMD5Hash(input) {
   if (!input) {
@@ -724,8 +726,9 @@ async function prepareDataForUpload(filePath, count = 10000) {
           };
       });
   } catch (error) {
-      console.error("Error preparing data for upload (prepareDataForUpload):", error);
-      throw error;
+    const logFilePath = logError(domain, err);
+    console.error(`Failed to upload data to Google Sheet. See full results in ${logFilePath}`);
+    throw err; // Consider how to handle this failure externally
   }
 }
 
@@ -881,3 +884,19 @@ function waitForFile(filePath, timeout = 3000) {
   });
 }
 
+function logError(domain, error) {
+  const logsDir = path.join(__dirname, "logs");
+  if (!fs.existsSync(logsDir)) {
+    fs.mkdirSync(logsDir);
+  }
+  const today = new Date();
+  const dateStr = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, "0")}-${today.getDate().toString().padStart(2, "0")}`;
+  const timeStr = `${today.getHours().toString().padStart(2, "0")}-${today.getMinutes().toString().padStart(2, "0")}-${today.getSeconds().toString().padStart(2, "0")}`;
+  const logFileName = `${domain}-${dateStr}-${timeStr}-error.log`;
+  const logFilePath = path.join(logsDir, logFileName);
+  
+  const errorDetails = `Error: ${error.message}\nStack: ${error.stack}\n\n`;
+  fs.appendFileSync(logFilePath, errorDetails);
+
+  return logFilePath;
+}
