@@ -11,22 +11,27 @@ let urlCheckCount = 0;
 const urlPattern = /^(https?:\/\/)?(www\.)?[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}([/?].*)?$/i;
 
 function preprocessUrl(url) {
+    // Ensure the URL starts with http:// or https://
     let fullUrl = url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`;
     
-    // Check if the URL matches the format
+    // Check if the URL matches the desired format using the regex pattern
     if (!urlPattern.test(fullUrl)) {
         console.error(`Invalid URL format: ${fullUrl}`);
         failedUrls.push(fullUrl);
         return null;
     }
 
-    const urlObj = new URL(fullUrl);
-    if (!urlObj.hostname.startsWith('www.')) {
-        urlObj.hostname = 'www.' + urlObj.hostname;
+    try {
+        const urlObj = new URL(fullUrl);
+        // Normalize the URL - this section can be customized if certain URL modifications are needed
+        fullUrl = urlObj.toString();
+        console.log(`Processed URL: ${fullUrl}`);
+        return fullUrl;
+    } catch (error) {
+        console.error(`Error processing URL: ${fullUrl}, Error: ${error}`);
+        failedUrls.push(fullUrl);
+        return null;
     }
-    fullUrl = urlObj.toString();
-    console.log(`Processed URL: ${fullUrl}`);
-    return fullUrl;
 }
 
 
@@ -79,11 +84,16 @@ function readCsv(csvFile) {
         fs.createReadStream(csvFile)
             .pipe(csv())
             .on('data', (row) => {
-                const url = Object.values(row)[0].trim();
-                if (url) {
-                    urls.push(preprocessUrl(url));
+                // Check if row is not empty and has at least one property
+                if (row && Object.keys(row).length > 0) {
+                    const firstColumnValue = Object.values(row)[0];
+                    if (typeof firstColumnValue === 'string' && firstColumnValue.trim()) {
+                        urls.push(preprocessUrl(firstColumnValue.trim()));
+                    } else {
+                        console.error(`Invalid or empty URL found in CSV: ${JSON.stringify(row)}`);
+                    }
                 } else {
-                    console.error(`Invalid or empty URL found in CSV: ${JSON.stringify(row)}`);
+                    console.error(`Empty or invalid row encountered: ${JSON.stringify(row)}`);
                 }
             })
             .on('end', () => {
