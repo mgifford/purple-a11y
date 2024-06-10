@@ -41,14 +41,12 @@ async function authenticateGoogleSheets() {
     return oAuth2Client;
 }
 
-
 function parseCSV(filePath) {
     const fileContent = fs.readFileSync(filePath, 'utf8');
     return parse(fileContent, { columns: true, skip_empty_lines: true, relax_column_count: true, trim: true });
 }
 
 require('events').EventEmitter.defaultMaxListeners = 50;  // Increase the listener limit
-
 
 async function runUnlighthouse(url) {
     console.log(`Running Unlighthouse for ${url}...`);
@@ -88,14 +86,11 @@ async function runUnlighthouse(url) {
     });
 }
 
-
-
-
 async function ensureSheetExists(sheets, spreadsheetId, sheetName, index) {
     try {
         const sheetMetadata = await sheets.spreadsheets.get({
             spreadsheetId,
-            fields: 'sheets.properties(sheetId, title)'  // Correct fields parameter
+            fields: 'sheets.properties(sheetId,title)'  // Correct fields parameter
         });
 
         // Check if the sheet exists
@@ -141,31 +136,6 @@ async function ensureSheetExists(sheets, spreadsheetId, sheetName, index) {
     return sheetName; // Ensure this is outside the if-else block
 }
 
-
-async function getSheetTitleByIndex(sheets, spreadsheetId, index) {
-    try {
-        const response = await sheets.spreadsheets.get({
-            spreadsheetId,
-            fields: 'sheets(properties(title, index))'
-        });
-
-        if (!response.data.sheets) {
-            throw new Error(`No sheets found in spreadsheet with ID ${spreadsheetId}`);
-        }
-
-        const sheet = response.data.sheets.find(sheet => sheet.properties.index === index);
-        if (sheet) {
-            return sheet.properties.title;
-        } else {
-            throw new Error(`No sheet found at index ${index}`);
-        }
-    } catch (error) {
-        console.error('Failed to get sheet title by index:', error.response ? error.response.data : error.message);
-        throw error;
-    }
-}
-
-
 async function uploadToGoogleSheet(auth, spreadsheetId, values) {
     const sheets = google.sheets({ version: 'v4', auth });
     const today = new Date().toISOString().slice(0, 10); // Use the current date as the sheet title
@@ -191,16 +161,11 @@ async function uploadToGoogleSheet(auth, spreadsheetId, values) {
     }
 }
 
-
-
 // Debugging memory usage
 function logMemoryUsage() {
     const used = process.memoryUsage().heapUsed / 1024 / 1024;
-    console.log(
-      `The script uses about ${Math.round(used)} MB`,
-    );
+    console.log(`The script uses about ${Math.round(used)} MB`);
 }
-
 
 function logError(domain, error) {
     const logsDir = path.join(__dirname, "logs");
@@ -219,7 +184,6 @@ function logError(domain, error) {
   
     return logFilePath;
 }
-
 
 // Inserts today's date into the last cell of the "Summary" sheet
 async function insertTodaysDateInSummarySheet(auth, spreadsheetId, url) {
@@ -267,7 +231,7 @@ async function insertTodaysDateInSummarySheet(auth, spreadsheetId, url) {
       const logFilePath = logError(spreadsheetId, err);
       console.error(`Error details can be found in ${logFilePath}`);
     }
-  }
+}
 
 async function main() {
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
@@ -316,7 +280,6 @@ async function main() {
         
             ${separator}
             `);
-            // console.log(`with config: ${JSON.stringify(site)}`);
 
             const sheetName = await ensureSheetExists(sheets, site.sheet_id, new Date().toISOString().slice(0, 10), 3);
 
@@ -326,8 +289,7 @@ async function main() {
             const formattedData = [headers, ...csvData.map(row => headers.map(header => row[header] || ''))];
 
             if (sheetName) {
-                // console.log('Auth client initialized for sheets API', auth);
-                await uploadToGoogleSheet(auth, site.sheet_id, sheetName, formattedData);
+                await uploadToGoogleSheet(auth, site.sheet_id, formattedData);
                 console.log("Data uploaded successfully, proceeding to insert date.");
 
                 // Refresh or reinitialize auth here
@@ -342,6 +304,5 @@ async function main() {
         console.error("An error occurred:", error);
     }
 }
-
 
 main();
