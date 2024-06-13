@@ -64,8 +64,11 @@ async function main() {
   // Define the command to run your scan based on the site type and other parameters
   // Removed as I don't think these are working in purple-a11y:  -a none ${exclude ? `--blacklistedPatternsFilename ${exclude}` : ''} 
 
-  let typeOption = `-c ${siteType === 'sitemap' ? '1' : '2'} -s ${strategy}`;
-  const command = `node --max-old-space-size=6000 --no-deprecation purple-a11y/cli.js -u ${siteUrl} ${typeOption} -p ${maxPages} -k "CivicActions gTracker:accessibility@civicactions.com"`;
+  let typeOption = `-c ${siteType === 'sitemap' ? `1` : `2`}`; // `2 -s ${strategy}`
+  // const command = `node --max-old-space-size=6000 --no-deprecation purple-a11y/cli.js -u ${siteUrl} ${typeOption} -p ${maxPages} -k "CivicActions gTracker:accessibility@civicactions.com"`;
+  // const command = `npm run cli --prefix ./purple-a11y -- run cli -- -u ${siteUrl} ${typeOption} -p ${maxPages} -a none -k "Mike Gifford:accessibility@civicactions.com"`;
+  const command = `NODE_OPTIONS="--max-old-space-size=6000 --no-deprecation" npm run cli --prefix ./purple-a11y -- -u ${siteUrl} -c ${strategy === 'sitemap' ? 1 : "2"} -w 1020 -p ${maxPages} -b 2 -k "Mike Gifford:accessibility@civicactions.com"`; // "2 -s same-domain"
+
 
       const startTime = new Date();
 
@@ -74,12 +77,12 @@ async function main() {
         const responseSpreadsheet = await sheets.spreadsheets.create({
           resource: {
             properties: {
-              title: entry.name,
+              title: siteName,
             },
           },
           fields: "spreadsheetId",
         });
-        const newSheetId = responseSpreadsheet.data.spreadsheetId;
+        spreadsheetId = responseSpreadsheet.data.spreadsheetId;
         
         let responseURL = await fetch(siteUrl);
         if (!responseURL) {
@@ -94,7 +97,9 @@ async function main() {
         const output = await runCommandWithTimeout(command, maxPages, 1, 30000, 3600000, siteUrl)
         await new Promise(resolve => setTimeout(resolve, 5000));
       } catch (error) {
-        console.error("Command failed after all retries:", error);
+        //console.error("Command failed after all retries:", error);
+        const logFilePath = logError(siteUrl, error);
+        console.error(`Error details can be found in ${logFilePath}`);
         return false;
       }
 
@@ -103,7 +108,7 @@ async function main() {
         const mostRecentDir = getMostRecentDirectory(RESULTS_DIR);
         const reportPath = path.join(RESULTS_DIR, mostRecentDir, "reports", "report.csv");
 
-        waitForFile(reportPath);
+        await waitForFile(reportPath);
         fs.exists(reportPath, async (exists) => {
           if (exists) {
             console.log(`${reportPath} exists (main), preparing data for upload.`);
@@ -124,11 +129,12 @@ async function main() {
 
         // Upload the processed CSV report to the Google Sheet
         await uploadToGoogleSheet(auth, spreadsheetId, processedRecords, scanDuration);
-        insertTodaysDateInSummarySheet(auth, spreadsheetId, siteUrl); // Insert today's date in the Summary sheet
+        await insertTodaysDateInSummarySheet(auth, spreadsheetId, siteUrl); // Insert today's date in the Summary sheet
 
         await new Promise(resolve => setTimeout(resolve, 60000)); // Wait 60 seconds before continuing
-        
-        console.log(`Data uploaded to Google Sheet URL: https://docs.google.com/spreadsheets/d/${spreadsheetId}`);
+        console.log(`\n\n\n ++++====++++ \n\nStarting Scan for ${siteName}`);
+        console.log(`\n\n ~~~@@@@~~~ \nData uploaded to Google Sheet URL: https://docs.google.com/spreadsheets/d/${spreadsheetId} \n\n`);
+
         processedRecords = null; // Clear processed records to free up memory
 
       } catch (error) {
@@ -137,6 +143,8 @@ async function main() {
           siteUrl,
           error,
         );
+        const logFilePath = logError(siteUrl, error);
+        console.error(`Error details can be found in ${logFilePath}`);
       } finally {
         console.log(`Scan for ${siteName} completed.`);
         await removeLock();  // Ensure lock is removed before exiting
@@ -198,8 +206,6 @@ async function runCommandWithTimeout(command, maxPages, maxAttempts, retryDelay,
   const cmd = parts[0];
   const args = parts.slice(1);
 
-  // console.log(`Preparing to execute: ${cmd} with args ${args.join(' ')}`);
-
   while (attempt < maxAttempts) {
       attempt++;
       console.log(`Attempt ${attempt}: Executing command: ${cmd} ${args.join(' ')}`);
@@ -217,8 +223,11 @@ async function runCommandWithTimeout(command, maxPages, maxAttempts, retryDelay,
           }
       } catch (error) {
         console.error(`Attempt ${attempt} failed with error: ${error.message}`);
+        console.error(`Command stderr: ${error.stderr}`);
         if (attempt >= maxAttempts) {
           console.error("All attempts failed, exiting.");
+          const logFilePath = logError(siteUrl, error); // Log the error
+          console.error(`Error details can be found in ${logFilePath}`);
           throw error;
         }
       } finally {
@@ -231,13 +240,14 @@ async function runCommandWithTimeout(command, maxPages, maxAttempts, retryDelay,
 
 async function executeCommand(cmd, args, totalTimeout) {
   return new Promise((resolve, reject) => {
+    console.log(`Executing command: ${cmd} ${args.join(' ')}`);
       const child = spawn(cmd, args, { shell: true });
       let stdout = '';
       let stderr = '';
 
       child.stdout.on('data', data => {
           stdout += data.toString();
-          console.log('', data.toString()); // Log output immediately for debugging
+          console.log(data.toString()); // Log output immediately for debugging
       });
 
       child.stderr.on('data', data => {
@@ -260,6 +270,7 @@ async function executeCommand(cmd, args, totalTimeout) {
       }, totalTimeout);
   });
 }
+
 
 
 // Example output processor that can decide to resolve early
@@ -289,6 +300,9 @@ async function parseAndUploadResults(filePath, auth, spreadsheetId, startTime) {
         await ensureSheetExists(sheets, spreadsheetId, sheetName, 4);
         // Check if clearing is needed then clear contents, retry on failure
         await clearSheetContents(sheets, spreadsheetId, sheetName);
+      } else {
+        console.log(`No records to upload to Google Sheets for ${sheetName}`);
+        return;
       }
 
       for (let i = 0; i < records.length; i += chunkSize) {
@@ -300,7 +314,9 @@ async function parseAndUploadResults(filePath, auth, spreadsheetId, startTime) {
           console.log(`Uploaded chunk ${i / chunkSize + 1} to Google Sheets`);
       }
   } catch (error) {
-      console.error('Failed to parse and upload CSV:', error);
+      // console.error('Failed to parse and upload CSV:', error);
+      const logFilePath = logError(filePath, error);
+      console.error(`Error details can be found in ${logFilePath}`);
   }
 }
 
@@ -321,6 +337,8 @@ async function clearSheetContents(sheets, spreadsheetId, sheetName) {
     console.log(`Cleared contents of sheet "${sheetName}".`);
   } catch (err) {
     console.error(`Error clearing sheet contents: ${err}`);
+    const logFilePath = logError(spreadsheetId, err);
+    console.error(`Error details can be found in ${logFilePath}`);
     throw err; // Rethrow to handle in retry logic
   }
 }
@@ -333,7 +351,7 @@ async function ensureSheetExists(sheets, spreadsheetId, sheetName, index) {
             fields: 'sheets(properties(title, index))'
         });
 
-        const exists = sheetMetadata.data.sheets.some(sheet => sheet.properties.title === sheetTitle);
+        const exists = sheetMetadata.data.sheets.some(sheet => sheet.properties.title === sheetName);
 
         if (!exists) {
             await sheets.spreadsheets.batchUpdate({
@@ -342,20 +360,22 @@ async function ensureSheetExists(sheets, spreadsheetId, sheetName, index) {
                     requests: [{
                         addSheet: {
                             properties: {
-                                title: sheetTitle,
+                                title: sheetName,
                                 index: index // Set index where new sheet should be inserted
                             }
                         }
                     }]
                 }
             });
-            console.log(`"${sheetTitle}" sheet created at position ${index + 1}.`);
+            console.log(`"${sheetName}" sheet created at position ${index + 1}.`);
         } else {
-            console.log(`Sheet "${sheetTitle}" already exists.`);
+            console.log(`Sheet "${sheetName}" already exists.`);
         }
     } catch (error) {
         console.error(`Error ensuring sheet exists: ${error}`);
-        throw error;
+        const logFilePath = logError(spreadsheetId, error);
+        console.error(`Error details can be found in ${logFilePath}`);
+        throw error; // Rethrow to handle it in the calling function
     }
 }
 
@@ -368,11 +388,15 @@ async function uploadToGoogleSheet(auth, spreadsheetId, processedRecords, scanDu
   try {
     const range = `${sheetName}!A1`;
 
+    // Ensure the sheet exists
+    await ensureSheetExists(sheets, spreadsheetId, sheetName, 4);
+
     // Log the range to verify its format
     console.log(`Uploading data to range: ${range}`);
+    console.log(`Sheet Name: ${sheetName}`);
+    console.log(`Spreadsheet ID: ${spreadsheetId}`);
 
-    // Append data to the sheet, retry on failure
-    await appendDataToSheet(sheets, spreadsheetId, sheetName, [
+    const data = [
       // Header row
       ["URL", "axe Impact", "Severity", "Issue ID", "WCAG Conformance", "Context", "HTML Fingerprint", "XPath", "Hash Context", "Hash xPath"],
       ...processedRecords.map(record => [
@@ -387,12 +411,21 @@ async function uploadToGoogleSheet(auth, spreadsheetId, processedRecords, scanDu
         record.md5Hashcontext,
         record.md5Hashxpath,
       ])
-    ]);
+    ];
+
+    console.log(`Data to be appended: ${JSON.stringify(data.slice(0, 2))}... and ${data.length - 2} more rows`); // Log only the first 2 rows and the total count
+
+    // Append data to the sheet, retry on failure
+    await appendDataToSheet(sheets, spreadsheetId, sheetName, data);
+
   } catch (err) {
     console.error("Failed to upload data to Google Sheet:", err);
+    const logFilePath = logError(spreadsheetId, err);
+    console.error(`Error details can be found in ${logFilePath}`);
     throw err; // Consider how to handle this failure externally
   }
 }
+
 
 async function appendDataToSheet(sheets, spreadsheetId, sheetName, data) {
   let range;
@@ -410,6 +443,7 @@ async function appendDataToSheet(sheets, spreadsheetId, sheetName, data) {
       valueInputOption: "USER_ENTERED",
       resource: { values: data },
     });
+
     console.log(`Data appended to sheet "${sheetName}" successfully.`);
   } catch (err) {
     console.error(`Error appending data to sheet ${range}: ${err.message}`);
@@ -422,10 +456,11 @@ async function appendDataToSheet(sheets, spreadsheetId, sheetName, data) {
     console.error(`Spreadsheet ID: ${spreadsheetId}`);
     console.error(`Sheet Name: ${sheetName}`);
     console.error(`Data: ${JSON.stringify(data)}`);
+    const logFilePath = logError(spreadsheetId, err);
+    console.error(`Error details can be found in ${logFilePath}`);
     throw err; // Rethrow to handle in retry logic
   }
 }
-
 
 
 // Authentication
@@ -529,6 +564,8 @@ const renameAndPrepareHtmlFiles = async (baseDir, siteUrl) => {
     }
   } catch (error) {
     console.error('Failed to rename HTML files:', error);
+    const logFilePath = logError(siteUrl, error);
+    console.error(`Error details can be found in ${logFilePath}`);
     throw error;
   }
 }
@@ -726,9 +763,9 @@ async function prepareDataForUpload(filePath, count = 10000) {
           };
       });
   } catch (error) {
-    const logFilePath = logError(domain, err);
-    console.error(`Failed to upload data to Google Sheet. See full results in ${logFilePath}`);
-    throw err; // Consider how to handle this failure externally
+    const logFilePath = logError(filePath, error);
+    console.error(`Failed to prepare data for upload. See full results in ${logFilePath}`);
+    throw error;
   }
 }
 
@@ -763,6 +800,8 @@ async function ensureSheetExists(sheets, spreadsheetId, sheetTitle, index) {
       }
     } catch (error) {
       console.error(`Error ensuring "${sheetTitle}" sheet exists:`, error);
+      const logFilePath = logError(spreadsheetId, error);
+      console.error(`Error details can be found in ${logFilePath}`);
       throw error; // Rethrow to handle it in the calling function
     }
 }
@@ -856,6 +895,8 @@ async function insertTodaysDateInSummarySheet(auth, spreadsheetId, url) {
     logMemoryUsage();
   } catch (err) {
     console.error("insertTodaysDateInSummarySheet: Error inserting today's date into the Summary sheet: ", err);
+    const logFilePath = logError(spreadsheetId, err);
+    console.error(`Error details can be found in ${logFilePath}`);
   }
 }
 
@@ -892,7 +933,8 @@ function logError(domain, error) {
   const today = new Date();
   const dateStr = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, "0")}-${today.getDate().toString().padStart(2, "0")}`;
   const timeStr = `${today.getHours().toString().padStart(2, "0")}-${today.getMinutes().toString().padStart(2, "0")}-${today.getSeconds().toString().padStart(2, "0")}`;
-  const logFileName = `${domain}-${dateStr}-${timeStr}-error.log`;
+  const sanitizedDomain = domain.replace(/[^a-zA-Z0-9]/g, "_"); // Sanitize the domain to be filesystem-safe
+  const logFileName = `${sanitizedDomain}-${dateStr}-${timeStr}-error.log`;
   const logFilePath = path.join(logsDir, logFileName);
   
   const errorDetails = `Error: ${error.message}\nStack: ${error.stack}\n\n`;
@@ -900,3 +942,7 @@ function logError(domain, error) {
 
   return logFilePath;
 }
+
+
+// Run the main function
+main();
