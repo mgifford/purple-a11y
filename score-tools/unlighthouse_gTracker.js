@@ -10,7 +10,7 @@ const baseDir = path.resolve(__dirname);
 const TOKEN_PATH = path.join(baseDir, "token.json");
 const CREDENTIALS_PATH = path.join(baseDir, "credentials.json");
 
-function readConfig(configFilePath = 'unlighthouse_sites.yml') {
+function readConfig(configFilePath = path.join(process.cwd(), 'unlighthouse-sites.yml')) {
     console.log(`Reading configuration file from ${configFilePath}...`);
     const configFileContent = fs.readFileSync(configFilePath, 'utf8');
     const config = yaml.load(configFileContent);
@@ -142,7 +142,7 @@ async function uploadToGoogleSheet(auth, spreadsheetId, values) {
     try {
         // Ensure the sheet with today's date exists (deletes if it already exists and creates new)
         console.log(`Ensuring sheet with title "${today}" exists in spreadsheet ID ${spreadsheetId}`);
-        await ensureSheetExists(sheets, spreadsheetId, today, 2);
+        await ensureSheetExists(sheets, spreadsheetId, today, 3);
 
         console.log(`Uploading data to the sheet: ${today}...`);
 
@@ -193,7 +193,7 @@ async function insertTodaysDateInSummarySheet(auth, spreadsheetId, url) {
   
     try {
       // First, ensure that the "Summary" sheet exists
-      await ensureSheetExists(sheets, spreadsheetId, "Summary", 2);
+      await ensureSheetExists(sheets, spreadsheetId, "Summary", 3);
   
       // Then, attempt to fetch the range to check if today's date already exists
       const range = "Summary!A:A";
@@ -242,7 +242,7 @@ async function main() {
             alias: 'yaml',
             description: 'Specify the YAML configuration file',
             type: 'string',
-            default: 'unlighthouse_sites.yml'
+            default: 'unlighthouse-sites.yml'
         })
         .option('d', {
             alias: 'day',
@@ -284,7 +284,7 @@ async function main() {
             const sheetName = await ensureSheetExists(sheets, site.sheet_id, new Date().toISOString().slice(0, 10), 3);
 
             const unlightOutput = await runUnlighthouse(site.url);
-            const csvData = parseCSV('./.unlighthouse/ci-result.csv');
+            const csvData = parseCSV(path.join(process.cwd(), '.unlighthouse/ci-result.csv'));
             const headers = Object.keys(csvData[0]);
             const formattedData = [headers, ...csvData.map(row => headers.map(header => row[header] || ''))];
 
