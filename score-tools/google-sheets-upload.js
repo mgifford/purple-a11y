@@ -1,3 +1,33 @@
+
+/**
+ * This script automates the process of crawling and scanning websites for accessibility issues using the Purple-A11y tool, 
+ * then uploads the results to Google Sheets. The script performs the following steps:
+ * 
+ * 1. Reads the configuration from a YAML file to get the list of websites to scan and their settings.
+ * 2. Ensures that each site entry has a dedicated Google Sheet, creating one if it does not exist.
+ * 3. Runs the Purple-A11y tool to scan the websites for accessibility issues, handling retries and timeouts.
+ * 4. Processes the scan results, including extracting relevant information from the report CSV files.
+ * 5. Uploads the processed results to Google Sheets, creating new sheets if necessary and updating existing ones.
+ * 6. Logs the scan duration and memory usage throughout the process.
+ * 
+ * Dependencies:
+ * - 'fs' for file system operations.
+ * - 'path' for handling file paths.
+ * - 'csv-parse' and 'csv-stringify' for parsing and writing CSV files.
+ * - 'axios' for making HTTP requests.
+ * - 'jsdom' for parsing HTML content.
+ * - 'googleapis' for interacting with Google Sheets.
+ * - 'yaml' for reading and writing YAML configuration files.
+ * - 'yargs' for command-line argument parsing.
+ * - 'crypto' for generating MD5 hashes.
+ * 
+ * Usage:
+ * - Ensure that 'google-crawl.yml' exists in the same directory as this script.
+ * - Run the script using Node.js: `node <script-name>.js`
+ * - The results will be written to Google Sheets specified in the configuration.
+ */
+
+
 // Module Imports
 
 const fs = require("fs");
@@ -75,7 +105,10 @@ async function manageSheets(auth) {
       const maxPages = entry.max || 5;
       
       // For debugging remove --no-deprecation and replace with --trace-deprecation 
-      const command = `node --max-old-space-size=6000 --no-deprecation purple-a11y/cli.js -u ${entry.url} -c ${entry.type === 'sitemap' ? 1 : "2 -s same-domain"} -p ${entry.max} -a none -k "Mike Gifford:mike.gifford@civicactions.com"`;
+      // const command = `node --max-old-space-size=6000 --no-deprecation purple-a11y/cli.js -u ${entry.url} -c ${entry.type === 'sitemap' ? 1 : "2 -s same-domain"} -p ${entry.max} -a none -k "Mike Gifford:accessibility@civicactions.com"`;
+      // npm run cli -- -c 2 -u https://www.civicactions.com -k "Mike Gifford:mike@example.com"
+      // const command = `cd purple-a11y & npm --max-old-space-size=6000 --no-deprecation run cli -- -u ${entry.url} -c ${entry.type === 'sitemap' ? 1 : "2 -s same-domain"} -p ${entry.max} -a none -k "Mike Gifford:accessibility@civicactions.com"`;
+      const command = `npm run cli --prefix ./purple-a11y -- run cli -- -u ${entry.url} -c ${entry.type === 'sitemap' ? 1 : "2 -s same-domain"} -p ${entry.max} -a none -k "Mike Gifford:accessibility@civicactions.com"`;
 
       // Await the completion of the command, including handling retries
       try {
