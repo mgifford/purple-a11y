@@ -1,3 +1,22 @@
+/*
+
+	1.	File Imports and Paths:
+	•	The script imports necessary modules (fs, path, csv-parse/sync, and csv-stringify/sync).
+	•	Defines paths for the input and output CSV files.
+	2.	parseCSV Function:
+	•	Reads the CSV file and parses its contents into an array of records.
+	•	Uses various options to handle columns, trimming, and skipping empty lines or lines with errors.
+	3.	writeCSV Function:
+	•	Converts an array of records into CSV format and writes it to the specified file.
+	4.	cleanCSV Function:
+	•	Main function that processes the CSV to remove duplicates.
+	•	Utilizes a Map to track domains, prioritizing ‘www.’ versions if both ‘www.’ and non-‘www.’ versions exist.
+	•	Writes the cleaned records to the output CSV file.
+	5.	Execution:
+	•	Calls the cleanCSV function to start the cleaning process.
+
+*/
+
 const fs = require('fs');
 const path = require('path');
 const { parse } = require('csv-parse/sync');
