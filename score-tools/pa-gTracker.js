@@ -1,3 +1,32 @@
+/**
+ * This script automates the process of crawling and scanning websites for accessibility issues using the Purple-A11y tool, 
+ * then uploads the results to Google Sheets. The script performs the following steps:
+ * 
+ * 1. Parses command-line arguments to get the site details to be scanned.
+ * 2. Authenticates with the Google Sheets API.
+ * 3. Ensures that each site entry has a dedicated Google Sheet, creating one if it does not exist.
+ * 4. Runs the Purple-A11y tool to scan the websites for accessibility issues, handling retries and timeouts.
+ * 5. Processes the scan results, including extracting relevant information from the report CSV files.
+ * 6. Uploads the processed results to Google Sheets, creating new sheets if necessary and updating existing ones.
+ * 7. Logs the scan duration and memory usage throughout the process.
+ * 
+ * Dependencies:
+ * - 'fs' for file system operations.
+ * - 'path' for handling file paths.
+ * - 'csv-parse' for parsing CSV files.
+ * - 'googleapis' for interacting with Google Sheets.
+ * - 'jsdom' for parsing HTML content.
+ * - 'yargs' for command-line argument parsing.
+ * - 'child_process' for running external commands.
+ * - 'crypto' for generating MD5 hashes.
+ * 
+ * Usage:
+ * - Ensure that 'google-crawl.yml' exists in the same directory as this script.
+ * - Run the script using Node.js with appropriate arguments, e.g., `node <script-name>.js --type crawl --name Example --url https://example.com --max 100 --sheet_id <spreadsheet-id> --exclude '' --strategy same-hostname`
+ * - The results will be written to Google Sheets specified in the configuration.
+ */
+
+
 // Module Imports
 const fs = require("fs");
 const readline = require("readline");
@@ -38,120 +67,6 @@ const argv = yargs(hideBin(process.argv)).options({
 
 removeLock(); // Ensure the lock is removed before starting
 
-async function main() {
-  if (await isLocked()) {
-    console.log('A scan is already in progress. Exiting...');
-    return;
-  }
-  await setLock();
-
-  // Authenticate with Google Sheets API
-  const auth = await authenticateGoogleSheets(CREDENTIALS_PATH);
-
-  // Use the command-line arguments directly
-  const siteType = argv.type;
-  const siteName = argv.name;
-  const siteUrl = argv.url;
-  const maxPages = argv.max;
-  const spreadsheetId = argv.sheet_id;   
-  const exclude = argv.exclude;
-  const strategy = argv.strategy;
-
-  console.log(`\n\n\n ++++====++++ \n\nStarting Scan for ${siteName}`);
-  console.log(`Processing ${siteType} for URL: ${siteUrl} with max pages: ${maxPages}`);
-  logMemoryUsage();
-
-  // Define the command to run your scan based on the site type and other parameters
-  // Removed as I don't think these are working in purple-a11y:  -a none ${exclude ? `--blacklistedPatternsFilename ${exclude}` : ''} 
-
-  let typeOption = `-c ${siteType === 'sitemap' ? `1` : `2`}`; // `2 -s ${strategy}`
-  // const command = `node --max-old-space-size=6000 --no-deprecation purple-a11y/cli.js -u ${siteUrl} ${typeOption} -p ${maxPages} -k "CivicActions gTracker:accessibility@civicactions.com"`;
-  // const command = `npm run cli --prefix ./purple-a11y -- run cli -- -u ${siteUrl} ${typeOption} -p ${maxPages} -a none -k "Mike Gifford:accessibility@civicactions.com"`;
-  const command = `NODE_OPTIONS="--max-old-space-size=6000 --no-deprecation" npm run cli --prefix ./purple-a11y -- -u ${siteUrl} -c ${strategy === 'sitemap' ? 1 : "2"} -w 1020 -p ${maxPages} -b 2 -k "Mike Gifford:accessibility@civicactions.com"`; // "2 -s same-domain"
-
-
-      const startTime = new Date();
-
-      // Ensure each site entry has a dedicated Google Sheet
-      if (!spreadsheetId) {
-        const responseSpreadsheet = await sheets.spreadsheets.create({
-          resource: {
-            properties: {
-              title: siteName,
-            },
-          },
-          fields: "spreadsheetId",
-        });
-        spreadsheetId = responseSpreadsheet.data.spreadsheetId;
-        
-        let responseURL = await fetch(siteUrl);
-        if (!responseURL) {
-          console.error(`Failed to load URL: ${siteUrl}`);
-          return false;
-        }
-      }
-
-      // Await the completion of the command, including handling retries
-      try {
-        // console.log(`Command: ${command}`);
-        const output = await runCommandWithTimeout(command, maxPages, 1, 30000, 3600000, siteUrl)
-        await new Promise(resolve => setTimeout(resolve, 5000));
-      } catch (error) {
-        //console.error("Command failed after all retries:", error);
-        const logFilePath = logError(siteUrl, error);
-        console.error(`Error details can be found in ${logFilePath}`);
-        return false;
-      }
-
-    // Assuming `getMostRecentDirectory` is meant to check within the results directory
-      try {
-        const mostRecentDir = getMostRecentDirectory(RESULTS_DIR);
-        const reportPath = path.join(RESULTS_DIR, mostRecentDir, "reports", "report.csv");
-
-        await waitForFile(reportPath);
-        fs.exists(reportPath, async (exists) => {
-          if (exists) {
-            console.log(`${reportPath} exists (main), preparing data for upload.`);
-            // Replace the existing CSV processing call with the new function
-            await parseAndUploadResults(reportPath, auth, spreadsheetId, startTime);
-          } else {
-            console.log(`${reportPath} does not exist.`);
-          }
-        });
-
-        // Optionally, call prepareDataForUpload if you need to process CSV data
-        console.log(`Preparing data for upload from: ${reportPath}`);
-        let processedRecords = await prepareDataForUpload(reportPath);
-
-        const endTime = new Date();
-        const scanDuration = formatDuration((endTime - startTime) / 1000); // Duration in seconds
-        console.log(`\n\nScan Duration: (${scanDuration})\n`);
-
-        // Upload the processed CSV report to the Google Sheet
-        await uploadToGoogleSheet(auth, spreadsheetId, processedRecords, scanDuration);
-        await insertTodaysDateInSummarySheet(auth, spreadsheetId, siteUrl); // Insert today's date in the Summary sheet
-
-        await new Promise(resolve => setTimeout(resolve, 60000)); // Wait 60 seconds before continuing
-        console.log(`\n\n\n ++++====++++ \n\nStarting Scan for ${siteName}`);
-        console.log(`\n\n ~~~@@@@~~~ \nData uploaded to Google Sheet URL: https://docs.google.com/spreadsheets/d/${spreadsheetId} \n\n`);
-
-        processedRecords = null; // Clear processed records to free up memory
-
-      } catch (error) {
-        console.error(
-          "Error processing and uploading data for URL:",
-          siteUrl,
-          error,
-        );
-        const logFilePath = logError(siteUrl, error);
-        console.error(`Error details can be found in ${logFilePath}`);
-      } finally {
-        console.log(`Scan for ${siteName} completed.`);
-        await removeLock();  // Ensure lock is removed before exiting
-        process.exit(0); // Successfully exit
-      }
-}
-
 async function authenticateGoogleSheets(credentialsPath) {
   // console.log("Authenticated with Google Sheets API");
 
@@ -173,6 +88,7 @@ async function authenticateGoogleSheets(credentialsPath) {
   return oAuth2Client;
 }
 
+/*
 function getNewToken(oAuth2Client) {
   const authUrl = oAuth2Client.generateAuthUrl({
     access_type: 'offline',
@@ -190,7 +106,7 @@ function getNewToken(oAuth2Client) {
     // Handle the error appropriately
   }
 }
-
+*/
 
 /**
  * Runs a command with a specified timeout and retry logic.
@@ -207,70 +123,73 @@ async function runCommandWithTimeout(command, maxPages, maxAttempts, retryDelay,
   const args = parts.slice(1);
 
   while (attempt < maxAttempts) {
-      attempt++;
-      console.log(`Attempt ${attempt}: Executing command: ${cmd} ${args.join(' ')}`);
-      try {
-          const { stdout, stderr } = await executeCommand(cmd, args, totalTimeout);
-          console.log(`Command stdout: ${stdout}`);
-          if (stderr) console.error(`Command stderr: ${stderr}`);
-
-          // Here you would call a function to process `stdout` to count pages or handle the output
-          // e.g., currentPageCount = processStdOut(stdout, currentPageCount);
-
-          if (currentPageCount >= maxPages) {
-              console.log(`Reached the page limit of ${maxPages}, stopping.`);
-              break;
-          }
-      } catch (error) {
-        console.error(`Attempt ${attempt} failed with error: ${error.message}`);
-        console.error(`Command stderr: ${error.stderr}`);
-        if (attempt >= maxAttempts) {
-          console.error("All attempts failed, exiting.");
-          const logFilePath = logError(siteUrl, error); // Log the error
-          console.error(`Error details can be found in ${logFilePath}`);
-          throw error;
-        }
-      } finally {
-        console.log(`Removing lock after attempt ${attempt}`);
-        await removeLock(); // Ensure lock is always removed
+    attempt++;
+    console.log(`Attempt ${attempt}: Executing command: ${cmd} ${args.join(' ')}`);
+    try {
+      const { stdout, stderr } = await executeCommand(cmd, args, totalTimeout);
+      console.log(`Command stdout: ${stdout}`);
+      if (stderr) {
+        console.error(`Command stderr: ${stderr}`);
       }
-      await new Promise(resolve => setTimeout(resolve, retryDelay));
+
+      // Here you would call a function to process `stdout` to count pages or handle the output
+      // e.g., currentPageCount = processStdOut(stdout, currentPageCount);
+
+      if (currentPageCount >= maxPages) {
+        console.log(`Reached the page limit of ${maxPages}, stopping.`);
+        break;
+      }
+    } catch (error) {
+      console.error(`Attempt ${attempt} failed with error: ${error.message}`);
+      if (error.stderr) {
+        console.error(`Command stderr: ${error.stderr}`);
+      }
+      if (attempt >= maxAttempts) {
+        console.error("All attempts failed, exiting.");
+        const logFilePath = logError(siteUrl, error); // Log the error
+        console.error(`Error details can be found in ${logFilePath}`);
+        throw error;
+      }
+    } finally {
+      console.log(`Removing lock after attempt ${attempt}`);
+      await removeLock(); // Ensure lock is always removed
+    }
+    await new Promise(resolve => setTimeout(resolve, retryDelay));
   }
 }
+
 
 async function executeCommand(cmd, args, totalTimeout) {
   return new Promise((resolve, reject) => {
     console.log(`Executing command: ${cmd} ${args.join(' ')}`);
-      const child = spawn(cmd, args, { shell: true });
-      let stdout = '';
-      let stderr = '';
+    const child = spawn(cmd, args, { shell: true });
+    let stdout = '';
+    let stderr = '';
 
-      child.stdout.on('data', data => {
-          stdout += data.toString();
-          console.log(data.toString()); // Log output immediately for debugging
-      });
+    child.stdout.on('data', data => {
+      stdout += data.toString();
+      console.log(data.toString());
+    });
 
-      child.stderr.on('data', data => {
-          stderr += data.toString();
-          console.log('STDERR:', data.toString()); // Log errors immediately for debugging
-      });
+    child.stderr.on('data', data => {
+      stderr += data.toString();
+      console.log('STDERR:', data.toString());
+    });
 
-      child.on('close', code => {
-          if (code === 0) {
-              resolve({ stdout, stderr });
-          } else {
-              reject(new Error(`Command failed with exit code ${code}: ${stderr}`));
-          }
-      });
+    child.on('close', code => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        reject(new Error(`Command failed with exit code ${code} - ${stderr}`));
+      }
+    });
 
-      // Timeout to kill the process if it runs too long
-      setTimeout(() => {
-          child.kill('SIGTERM'); // Ensure to terminate the process
-          reject(new Error(`Command timeout after ${totalTimeout} ms: ${stderr}`)); // Include stderr even in timeout
-      }, totalTimeout);
+    setTimeout(() => {
+      child.kill('SIGTERM');
+      reject(new Error(`Command timeout after ${totalTimeout} ms: ${stderr}`));
+    }, totalTimeout);
   });
 }
-
 
 
 // Example output processor that can decide to resolve early
@@ -372,7 +291,7 @@ async function ensureSheetExists(sheets, spreadsheetId, sheetName, index) {
             console.log(`Sheet "${sheetName}" already exists.`);
         }
     } catch (error) {
-        console.error(`Error ensuring sheet exists: ${error}`);
+        console.error(`Error ensuring sheet exists: ${error} \n${spreadsheetId} \n${sheetName} \n${index}`);
         const logFilePath = logError(spreadsheetId, error);
         console.error(`Error details can be found in ${logFilePath}`);
         throw error; // Rethrow to handle it in the calling function
@@ -546,7 +465,6 @@ function getMostRecentDirectory(basePath, timeWindow = 300000) { // 5 minutes wi
 }
 
 
-
 const renameAndPrepareHtmlFiles = async (baseDir, siteUrl) => {
   const currentDate = new Date().toISOString().split('T')[0]; // Format as YYYY-MM-DD
   const domain = new URL(siteUrl).hostname;
@@ -570,18 +488,6 @@ const renameAndPrepareHtmlFiles = async (baseDir, siteUrl) => {
   }
 }
 
-
-
-/*
-function saveConfig(config) {
-  try {
-    fs.writeFileSync(YAML_CONFIG, yaml.dump(config), "utf8");
-    console.log("Updated YAML configuration saved.");
-  } catch (e) {
-    console.error("Failed to save the updated configuration:", e);
-  }
-}
-*/
 
 // Utility Functions
 
@@ -773,39 +679,42 @@ async function prepareDataForUpload(filePath, count = 10000) {
 
 // This function checks if a specific sheet exists, and creates it if not 
 // It is a near duplicate of the ensureSheetExists function which occurs inside another function
-async function ensureSheetExists(sheets, spreadsheetId, sheetTitle, index) {
-    try {
+/*
+async function ensureSheetExists(sheets, spreadsheetId, sheetName, index) {
+  try {
       const sheetMetadata = await sheets.spreadsheets.get({
-        spreadsheetId,
-        fields: 'sheets(properties/title)',
-      });
-  
-      const sheetExists = sheetMetadata.data.sheets.some(sheet => sheet.properties.title === sheetTitle);
-  
-      if (!sheetExists) {
-        await sheets.spreadsheets.batchUpdate({
           spreadsheetId,
-          resource: {
-            requests: [{
-              addSheet: {
-                properties: {
-                    title: sheetTitle,
-                    index: index // Ensure this is a valid index
-                }
-              },
-            }],
-          },
-        });
-        console.log(`"${sheetTitle}" sheet did not exist and was created.`);
+          fields: 'sheets(properties(title, sheetId))',
+      });
+
+      const existingSheet = sheetMetadata.data.sheets.find(sheet => sheet.properties.title === sheetName);
+
+      if (!existingSheet) {
+          await sheets.spreadsheets.batchUpdate({
+              spreadsheetId,
+              resource: {
+                  requests: [{
+                      addSheet: {
+                          properties: {
+                              title: sheetName,
+                              index: index // Ensure this is a valid index
+                          }
+                      }
+                  }]
+              }
+          });
+          console.log(`"${sheetName}" sheet did not exist and was created.`);
+      } else {
+          console.log(`Sheet "${sheetName}" already exists with ID: ${existingSheet.properties.sheetId}.`);
       }
-    } catch (error) {
-      console.error(`Error ensuring "${sheetTitle}" sheet exists:`, error);
-      const logFilePath = logError(spreadsheetId, error);
+  } catch (error) {
+    console.error(`Error ensuring sheet exists: ${error} \n${spreadsheetId} \n${sheetName} \n${index}`);
+    const logFilePath = logError(spreadsheetId, error);
       console.error(`Error details can be found in ${logFilePath}`);
       throw error; // Rethrow to handle it in the calling function
-    }
+  }
 }
-
+*/
 
 function setLock() {
   return new Promise((resolve, reject) => {
@@ -941,6 +850,105 @@ function logError(domain, error) {
   fs.appendFileSync(logFilePath, errorDetails);
 
   return logFilePath;
+}
+
+
+async function main() {
+  if (await isLocked()) {
+    console.log('A scan is already in progress. Exiting...');
+    return;
+  }
+  await setLock();
+
+  try {
+    // Authenticate with Google Sheets API
+    const auth = await authenticateGoogleSheets(CREDENTIALS_PATH);
+
+    // Use the command-line arguments directly
+    const siteType = argv.type;
+    const siteName = argv.name;
+    const siteUrl = argv.url;
+    const maxPages = argv.max;
+    let spreadsheetId = argv.sheet_id;   
+    const exclude = argv.exclude;
+    const strategy = argv.strategy;
+
+    console.log(`\n\n\n ++++====++++ \n\nStarting Scan for ${siteName}`);
+    console.log(`Processing ${siteType} for URL: ${siteUrl} with max pages: ${maxPages}`);
+    logMemoryUsage();
+
+    const command = `NODE_OPTIONS="--max-old-space-size=6000 --no-deprecation" npm run cli --prefix ./purple-a11y -- -u ${siteUrl} -c ${strategy === 'sitemap' ? 1 : "2"} -w 1020 -p ${maxPages} -b 2 -k "Mike Gifford:accessibility@civicactions.com"`;
+
+    const startTime = new Date();
+
+    // Ensure each site entry has a dedicated Google Sheet
+    if (!spreadsheetId) {
+      const responseSpreadsheet = await google.sheets({ version: "v4", auth }).spreadsheets.create({
+        resource: {
+          properties: {
+            title: siteName,
+          },
+        },
+        fields: "spreadsheetId",
+      });
+      spreadsheetId = responseSpreadsheet.data.spreadsheetId;
+
+      let responseURL = await fetch(siteUrl);
+      if (!responseURL) {
+        console.error(`Failed to load URL: ${siteUrl}`);
+        return false;
+      }
+    }
+
+    try {
+      const output = await runCommandWithTimeout(command, maxPages, 1, 30000, 3600000, siteUrl);
+      await new Promise(resolve => setTimeout(resolve, 5000));
+    } catch (error) {
+      const logFilePath = logError(siteUrl, error);
+      console.error(`Error details can be found in ${logFilePath}`);
+      return false;
+    }
+
+    try {
+      const mostRecentDir = getMostRecentDirectory(RESULTS_DIR);
+      const reportPath = path.join(RESULTS_DIR, mostRecentDir, "reports", "report.csv");
+
+      await waitForFile(reportPath);
+      if (fs.existsSync(reportPath)) {
+        console.log(`${reportPath} exists (main), preparing data for upload.`);
+        await parseAndUploadResults(reportPath, auth, spreadsheetId, startTime);
+      } else {
+        console.log(`${reportPath} does not exist.`);
+      }
+
+      let processedRecords = await prepareDataForUpload(reportPath);
+
+      const endTime = new Date();
+      const scanDuration = formatDuration((endTime - startTime) / 1000); // Duration in seconds
+      console.log(`\n\nScan Duration: (${scanDuration})\n`);
+
+      await uploadToGoogleSheet(auth, spreadsheetId, processedRecords, scanDuration);
+      await insertTodaysDateInSummarySheet(auth, spreadsheetId, siteUrl); // Insert today's date in the Summary sheet
+
+      await new Promise(resolve => setTimeout(resolve, 60000)); // Wait 60 seconds before continuing
+      console.log(`\n\n\n ++++====++++ \n\nStarting Scan for ${siteName}`);
+      console.log(`\n\n ~~~@@@@~~~ \nData uploaded to Google Sheet URL: https://docs.google.com/spreadsheets/d/${spreadsheetId} \n\n`);
+
+      processedRecords = null; // Clear processed records to free up memory
+
+    } catch (error) {
+      console.error("Error processing and uploading data for URL:", siteUrl, error);
+      const logFilePath = logError(siteUrl, error);
+      console.error(`Error details can be found in ${logFilePath}`);
+    } finally {
+      console.log(`Scan for ${siteName} completed.`);
+      await removeLock();  // Ensure lock is removed before exiting
+      process.exit(0); // Successfully exit
+    }
+  } catch (error) {
+    console.error('Unexpected error:', error);
+    await removeLock();
+  }
 }
 
 
