@@ -22,6 +22,8 @@
  * - Ensure that 'french-gov-domains.csv' exists in the same directory as this script.
  * - Run the script using Node.js: `node <script-name>.js`
  * - The output will be written to 'drupal-sites.csv' in the same directory.
+ *
+ * Also see: find-metatag-usa.js
  */
 
 
