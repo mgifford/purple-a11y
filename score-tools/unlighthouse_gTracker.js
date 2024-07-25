@@ -1,30 +1,72 @@
 const { google } = require('googleapis');
 const fs = require('fs');
-const { spawn } = require('child_process');
+const { spawn, exec } = require('child_process');
 const path = require('path');
 const yaml = require('js-yaml');
 const yargs = require('yargs');
 const { parse } = require('csv-parse/sync');
 const { readdir } = require('fs/promises');
 const { parse: parseUrl } = require('url');
+const { EventEmitter } = require('events');
 
+// Set the max listeners to a higher value to avoid memory leak warnings
+EventEmitter.defaultMaxListeners = 100;
+process.setMaxListeners(90);
 
-// const baseDir = path.resolve(__dirname);
+// Increase Puppeteer protocol timeout (adjust as necessary)
+const PUPPETEER_TIMEOUT = 60000; // 60 seconds
+
 const baseDir = path.resolve('/Users/mgifford/CA-Sitemap-Scans');
 const TOKEN_PATH = path.join(baseDir, "token.json");
 const CREDENTIALS_PATH = path.join(baseDir, "credentials.json");
 
-function readConfig(configFilePath = path.join(process.cwd(), 'unlighthouse-sites.yml')) {
-    console.log(`Reading configuration file from ${configFilePath}...`);
-    const configFileContent = fs.readFileSync(configFilePath, 'utf8');
-    const config = yaml.load(configFileContent);
-    const sites = [];
-    for (const [url, entries] of Object.entries(config)) {
-        entries.forEach(entry => sites.push({ url, ...entry }));
-    }
-    console.log(`Loaded ${sites.length} sites from configuration.`);
-    return sites;
+const configFilePath = path.join(__dirname, 'unlighthouse-sites.yml');
+
+// Define delay function
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+function readConfig(url) {
+    try {
+        const configFileContent = fs.readFileSync(configFilePath, 'utf8');
+        const config = yaml.load(configFileContent);
+        for (const siteGroup of Object.values(config)) {
+            for (const site of siteGroup) {
+                if (site.url === url) {
+                    // Default csv_directory if not defined
+                    site.csv_directory = site.csv_directory || path.join(baseDir, '.unlighthouse');
+                    return site;
+                }
+            }
+        }
+    } catch (e) {
+        console.error('Error reading configuration file:', e.message);
+        return null;
+    }
+    return null;
+}
+
+const argv = yargs
+    .option('url', {
+        description: 'Specify the URL to run the script for',
+        type: 'string',
+        demandOption: true
+    })
+    .help()
+    .alias('help', 'h')
+    .argv;
+
+const specifiedUrl = argv.url;
+const siteConfig = readConfig(specifiedUrl);
+
+if (!siteConfig) {
+    console.error(`No matching site found for URL: ${specifiedUrl}`);
+    process.exit(1);
+}
+
+// console.log(`Processing URL: ${specifiedUrl}`);
+// console.log(`Site configuration: ${JSON.stringify(siteConfig, null, 2)}`);
 
 async function authenticateGoogleSheets() {
     console.log("Authenticating with Google Sheets...");
@@ -53,7 +95,7 @@ function parseCSV(filePath) {
             delimiter: ',',
             trim: true,
             skip_empty_lines: true,
-            relax_column_count: true // Allow variable number of columns
+            relax_column_count: true
         });
     } catch (error) {
         console.error(`Error parsing CSV file ${filePath}: ${error.message}`);
@@ -64,10 +106,8 @@ function parseCSV(filePath) {
     }
 }
 
-require('events').EventEmitter.defaultMaxListeners = 5;  // Increase the listener limit
 
-
-async function runUnlighthouse(url, timeout = 1800000) { // 30 minutes in milliseconds
+async function runUnlighthouse(url, timeout = 1800000) {
     console.log(`Running Unlighthouse for ${url}...`);
     const output = [];
     const startTime = new Date();
@@ -79,35 +119,46 @@ async function runUnlighthouse(url, timeout = 1800000) { // 30 minutes in millis
         timeZoneName: 'short'
     };
     const formattedStartTime = new Intl.DateTimeFormat('en-US', options).format(startTime);
-    console.log(`Start time: ${formattedStartTime}`);
+    console.log(`Start time for ${url}: ${formattedStartTime}`);
 
     const unlighthouse = spawn('npx', [
         'unlighthouse-ci',
         '--site', url,
         '--throttle',
         '--yes',
-        '--timeout', '60000',  // 60 seconds timeout
         '--reporter', 'csvExpanded',
         '--config', 'unlighthouse.config.ts,unlighthouse.config-cms.ts,unlighthouse.config-nsf.ts',
         '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36',
         '--expose-gc',
-        '--protocol-timeout', '120000',  // Increase Puppeteer protocol timeout to 120 seconds
-        '--navigation-timeout', '120000'  // Increase navigation timeout to 120 seconds
+        '--timeout', '60000', // Set the timeout to 60 seconds
+        '--protocol-timeout', '300000', // Increase the protocol timeout to 5 minutes
+        '--navigation-timeout', '60000', // Increase the navigation timeout to 60 seconds
+        '--log-level', 'error' // Adjust this according to Unlighthouse documentation
+        // , '--no-sandbox',
     ]);
 
-    unlighthouse.stdout.on('data', data => {
-        console.log(`[Unlighthouse Output] ${data.toString()}`);
-        output.push(data.toString());
-    });
+    // Set the max listeners to a higher value for the spawned process
+    unlighthouse.stdout.setMaxListeners(50);
+    unlighthouse.stderr.setMaxListeners(50);
 
-    unlighthouse.stderr.on('data', data => {
-        console.error(`[Unlighthouse Error] ${data}`);
+    const handleData = data => {
+        console.log(`[Unlighthouse Output for ${url}] ${data.toString()}`);
+        output.push(data.toString());
+    };
+
+    const handleError = data => {
+        console.error(`[Unlighthouse Error for ${url}] ${data}`);
         fs.appendFileSync('unlighthouse-error.log', data.toString());
-    });
+    };
+
+    unlighthouse.stdout.on('data', handleData);
+    unlighthouse.stderr.on('data', handleError);
 
     const unlighthousePromise = new Promise((resolve, reject) => {
         unlighthouse.on('close', code => {
-            const duration = (Date.now() - startTime) / 1000; // Calculate the duration in seconds
+            const duration = (Date.now() - startTime) / 1000;
+            unlighthouse.stdout.off('data', handleData);
+            unlighthouse.stderr.off('data', handleError);
             if (code !== 0) {
                 console.error(`Unlighthouse process for ${url} exited with code ${code} after ${duration} seconds.`);
                 reject(new Error('Unlighthouse failed to complete successfully.'));
@@ -120,47 +171,31 @@ async function runUnlighthouse(url, timeout = 1800000) { // 30 minutes in millis
 
     const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => {
-            console.log("Handling timeout, attempting to save results...");
+            console.log(`Handling timeout for ${url}, attempting to save results...`);
             savePartialResults(output);
+            unlighthouse.stdout.off('data', handleData);
+            unlighthouse.stderr.off('data', handleError);
             reject(new Error(`Unlighthouse process for ${url} timed out after ${timeout / 60000} minutes.`));
         }, timeout);
     });
 
     function savePartialResults(output) {
-        console.log("Saving partial results: ", output);
+        console.log(`Saving partial results for ${url}: `, output);
     }
 
-    return Promise.race([unlighthousePromise.catch(error => reject(error)), timeoutPromise.catch(error => reject(error))]);
+    return Promise.race([unlighthousePromise, timeoutPromise]).finally(() => {
+        console.log(`Closing Chrome instances for ${url}...`);
+        exec('pkill -f "Chrome Canary"');
+    });
 }
 
 
-async function runWithRetry(url, retries = 3, timeout = 1800000) {
-    for (let attempt = 1; attempt <= retries; attempt++) {
-        try {
-            console.log(`Attempt ${attempt} to run Unlighthouse for ${url}`);
-            return await runUnlighthouse(url, timeout);
-        } catch (error) {
-            console.error(`Attempt ${attempt} failed: ${error.message}`);
-            if (attempt < retries) {
-                const delayTime = Math.pow(2, attempt) * 1000; // Exponential backoff
-                console.log(`Retrying after ${delayTime / 1000} seconds...`);
-                await delay(delayTime);
-            } else {
-                console.error(`All ${retries} attempts failed for ${url}`);
-                throw error; // Ensure to throw the error if all attempts fail
-            }
-        }
-    }
-}
-
-function delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-async function ensureSheetExists(sheets, spreadsheetId, sheetName, index) {
+async function ensureSheetExists(auth, spreadsheetId, sheetName, index) {
+    const sheets = google.sheets({ version: 'v4', auth }); // Ensure this is correctly instantiated
     try {
         const sheetMetadata = await sheets.spreadsheets.get({
             spreadsheetId,
+            auth, // Added auth here
             fields: 'sheets.properties(sheetId,title)'  // Correct fields parameter
         });
 
@@ -178,6 +213,7 @@ async function ensureSheetExists(sheets, spreadsheetId, sheetName, index) {
             console.log(`Deleting existing sheet with title "${sheetName}" and ID "${existingSheet.properties.sheetId}"`);
             await sheets.spreadsheets.batchUpdate({
                 spreadsheetId,
+                auth, // Added auth here
                 resource: {
                     requests: [{
                         deleteSheet: {
@@ -187,13 +223,13 @@ async function ensureSheetExists(sheets, spreadsheetId, sheetName, index) {
                 }
             });
             console.log(`Sheet "${sheetName}" deleted.`);
-
         }
 
         // Create the new sheet
         console.log(`Creating new sheet with title "${sheetName}" at index ${index}`);
         await sheets.spreadsheets.batchUpdate({
             spreadsheetId,
+            auth, // Added auth here
             resource: {
                 requests: [{
                     addSheet: {
@@ -214,13 +250,14 @@ async function ensureSheetExists(sheets, spreadsheetId, sheetName, index) {
     return sheetName; // Ensure this is outside the if-else block
 }
 
+
 async function uploadToGoogleSheet(auth, spreadsheetId, values) {
     const sheets = google.sheets({ version: 'v4', auth });
     const today = new Date().toISOString().slice(0, 10); // Use the current date as the sheet title
     try {
         // Ensure the sheet with today's date exists (deletes if it already exists and creates new)
         console.log(`Ensuring sheet with title "${today}" exists in spreadsheet ID ${spreadsheetId}`);
-        await ensureSheetExists(sheets, spreadsheetId, today, 2);
+        await ensureSheetExists(auth, spreadsheetId, today, 2);
 
         console.log(`Uploading data to the sheet: ${today}...`);
 
@@ -235,6 +272,9 @@ async function uploadToGoogleSheet(auth, spreadsheetId, values) {
         console.log('Data uploaded successfully to the sheet.');
     } catch (error) {
         console.error('Failed to upload data to the sheet:', error.response ? JSON.stringify(error.response.data) : error.message);
+        if (error.response && error.response.data) {
+            console.error('Error details:', JSON.stringify(error.response.data));
+        }
         throw error;
     }
 }
@@ -245,7 +285,7 @@ function logMemoryUsage() {
         global.gc();
     }
     const used = process.memoryUsage().heapUsed / 1024 / 1024;
-    console.log(`The script uses about ${Math.round(used)} MB`);
+    console.log(`The script uses approximately ${Math.round(used)} MB`);
 }
 
 function logError(domain, error) {
@@ -274,7 +314,7 @@ async function insertTodaysDateInSummarySheet(auth, spreadsheetId, url) {
 
     try {
         // First, ensure that the "Summary" sheet exists
-        await ensureSheetExists(sheets, spreadsheetId, "Summary", 2);
+        await ensureSheetExists(auth, spreadsheetId, "Summary", 2);
 
         // Then, attempt to fetch the range to check if today's date already exists
         const range = "Summary!A:A";
@@ -315,17 +355,11 @@ async function insertTodaysDateInSummarySheet(auth, spreadsheetId, url) {
 
 async function getLatestCSVFile(directory) {
     const files = await readdir(directory);
-    const csvFiles = files.filter(file => file.startsWith('weekly-snapshot') && file.endsWith('.csv'));
+    const csvFiles = files.filter(file => file === 'ci-result.csv');
 
     if (csvFiles.length === 0) {
         throw new Error('No CSV files found in the directory');
     }
-
-    csvFiles.sort((a, b) => {
-        const dateA = new Date(a.match(/\d{4}-\d{2}-\d{2}/)[0]);
-        const dateB = new Date(b.match(/\d{4}-\d{2}-\d{2}/)[0]);
-        return dateB - dateA;
-    });
 
     const latestCSVFile = csvFiles[0];
     const filePath = path.join(directory, latestCSVFile);
@@ -348,7 +382,6 @@ async function getLatestCSVFile(directory) {
 
     return filePath;
 }
-
 
 
 async function findRowByUrl(url, filePath) {
@@ -426,6 +459,7 @@ async function findRowByUrl(url, filePath) {
     }
 }
 
+
 module.exports = findRowByUrl;
 
 // Function to convert a number to a column letter (1 -> A, 27 -> AA, etc.)
@@ -439,7 +473,6 @@ function getColumnLetter(index) {
     return letter;
 }
 
-
 async function appendToGoogleSheet(auth, spreadsheetId, sheetName, row) {
     const sheets = google.sheets({ version: 'v4', auth });
     const values = [Object.values(row)];
@@ -449,8 +482,8 @@ async function appendToGoogleSheet(auth, spreadsheetId, sheetName, row) {
     const range = `${sheetName}!A500:${lastColumn}500`; // Define the range dynamically
 
     try {
-        // console.log(`Appending data to ${range} in spreadsheet ID ${spreadsheetId}`);
-        // console.log(`Data to be appended: ${JSON.stringify(values)}`);
+        console.log(`Appending data to ${range} in spreadsheet ID ${spreadsheetId}`);
+        console.log(`Data to be appended: ${JSON.stringify(values)}`);
 
         const response = await sheets.spreadsheets.values.update({
             spreadsheetId,
@@ -471,111 +504,113 @@ async function appendToGoogleSheet(auth, spreadsheetId, sheetName, row) {
 }
 
 
+async function processUrl(url, config) {
+    console.log(`Running Unlighthouse for ${url} with config:`);
+    console.log(config);
+
+    try {
+        const unlightOutput = await runWithRetry(url);
+        const csvFilePath = path.join(config.csv_directory, 'ci-result.csv');
+
+        // Ensure the CSV file exists
+        if (!fs.existsSync(csvFilePath)) {
+            throw new Error(`CSV file not found at path: ${csvFilePath}`);
+        }
+
+        const csvData = parseCSV(csvFilePath);
+        const headers = Object.keys(csvData[0]);
+        const formattedData = [headers, ...csvData.map(row => headers.map(header => row[header] || ''))];
+
+        const auth = await authenticateGoogleSheets().catch(error => {
+            console.error(`Error during Google Sheets authentication for ${url}:`, error);
+            throw error;
+        });
+
+        const sheetName = await ensureSheetExists(auth, config.sheet_id, new Date().toISOString().slice(0, 10), 2).catch(error => {
+            console.error(`Error ensuring sheet exists for ${url}:`, error);
+            throw error;
+        });
+
+        if (sheetName) {
+            let row = await findRowByUrl(url, csvFilePath);
+            if (row) {
+                await appendToGoogleSheet(auth, config.sheet_id, 'Introduction', row);
+                console.log(`Row appended to Google Sheet for ${url}`);
+            } else {
+                console.log(`URL ${url} not found in CSV`);
+            }
+
+            await uploadToGoogleSheet(auth, config.sheet_id, formattedData).catch(error => {
+                console.error(`Error uploading to Google Sheet for ${url}:`, error);
+                throw error;
+            });
+            console.log(`Data uploaded successfully for ${url}.`);
+
+            await insertTodaysDateInSummarySheet(auth, config.sheet_id, url);
+        } else {
+            console.log(`Sheet name is empty for ${url}`);
+        }
+    } catch (error) {
+        console.error(`An error occurred while processing ${url}:`, error);
+    }
+}
+
+
+async function runWithRetry(url, retries = 3, timeout = 1800000) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            console.log(`Attempt ${attempt} to run Unlighthouse for ${url}`);
+            return await runUnlighthouse(url, timeout);
+        } catch (error) {
+            console.error(`Attempt ${attempt} for ${url} failed: ${error.message}`);
+            if (attempt < retries) {
+                const delayTime = Math.pow(2, attempt) * 1000; // Exponential backoff
+                console.log(`Retrying ${url} after ${delayTime / 1000} seconds...`);
+                await delay(delayTime);
+            } else {
+                console.error(`All ${retries} attempts for ${url} failed.`);
+                throw error; // Ensure to throw the error if all attempts fail
+            }
+        }
+    }
+}
+
+
 async function main() {
-    const today = new Date().toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
     const argv = yargs
-        .option('y', {
-            alias: 'yaml',
-            description: 'Specify the YAML configuration file',
+        .option('url', {
+            description: 'Specify the URL to run the script for',
             type: 'string',
-            default: 'unlighthouse-sites.yml'
-        })
-        .option('d', {
-            alias: 'day',
-            description: 'Specify the day to run the sites',
-            type: 'string',
-            default: ''
+            demandOption: true
         })
         .help()
         .alias('help', 'h')
         .argv;
 
-    const configFile = argv.yaml;
-    const specifiedDay = argv.day ? argv.day.toLowerCase() : today;
-    const csvDirectory = __dirname;  // Directory where your CSV files are stored
+    const specifiedUrl = argv.url;
+    const siteConfig = readConfig(specifiedUrl);
+
+    if (!siteConfig) {
+        console.error(`No matching site found for URL: ${specifiedUrl}`);
+        process.exit(1);
+    }
+
+    console.log(`Processing URL: ${specifiedUrl}`);
+    console.log(`Site configuration: ${JSON.stringify(siteConfig, null, 2)}`);
 
     try {
-        const sites = readConfig(configFile);
-
-        let auth = await authenticateGoogleSheets();
-        const sheets = google.sheets({ version: 'v4', auth });
-
-        const latestCSVFile = await getLatestCSVFile(csvDirectory);
-        console.log(`\n\n\nLatest CSV file: ${latestCSVFile} in ${csvDirectory}\n`);
-
-        for (const site of sites) {
-            logMemoryUsage();
-            const siteDay = site.start_date.toLowerCase();
-            if (specifiedDay !== 'all' && siteDay !== specifiedDay) {
-                if (argv.day) {
-                    console.log(`${site.url} skipped as you were looking for scripts which ran on ${argv.day}.`);
-                } else {
-                    console.log(`${site.url} skipped as it is ${today.charAt(0).toUpperCase() + today.slice(1)}.`);
-                }
-                continue;
-            }
-
-            // Expose garbage collection
-            if (global.gc) {
-                console.log("Garbage collection is exposed.");
-            } else {
-                console.warn("Run Node with --expose-gc for better memory management.");
-            }
-
-            const separator = '#'.repeat(33);
-            console.log(`
-            ${separator}
-        
-            Starting processing for site: ${site.url}
-        
-            ${separator}
-            `);
-
-            const sheetName = await ensureSheetExists(sheets, site.sheet_id, new Date().toISOString().slice(0, 10), 2);
-
-            try {
-                const unlightOutput = await runWithRetry(site.url);
-                const csvData = parseCSV(path.join(process.cwd(), '.unlighthouse/ci-result.csv'));
-                const headers = Object.keys(csvData[0]);
-                const formattedData = [headers, ...csvData.map(row => headers.map(header => row[header] || ''))];
-
-                if (sheetName) {
-                    let row = await findRowByUrl(site.url, latestCSVFile);
-                    if (row) {
-                        await appendToGoogleSheet(auth, site.sheet_id, 'Introduction', row);
-                        console.log(`Row appended to Google Sheet for ${site.url}`);
-                    } else {
-                        console.log('URL not found in CSV');
-                    }
-
-                    await uploadToGoogleSheet(auth, site.sheet_id, formattedData);
-                    console.log("Data uploaded successfully.");
-
-                    auth = await authenticateGoogleSheets();
-                    await insertTodaysDateInSummarySheet(auth, site.sheet_id, site.url);
-
-                    const separator2 = '%'.repeat(33);
-                    console.log(`
-                    ${separator2}
-                
-                    Date updated sheets for ${site.url} in Google Sheet: 
-                    https://docs.google.com/spreadsheets/d/${site.sheet_id}
-                
-                    ${separator2}
-                    `);
-                } else {
-                    console.log(`Sheet name is empty for ${site.url}`);
-                }
-            } catch (error) {
-                console.error(`An error occurred while processing ${site.url}:`, error);
-            }
-        }
+        await processUrl(specifiedUrl, siteConfig).catch(error => {
+            console.error('Unhandled error in processUrl:', error);
+            process.exit(1);  // Exit with error code
+        });
+        process.exit(0);  // Exit with success code
     } catch (error) {
-        console.error("An error occurred:", error);
-    } finally {
-        console.log('Script execution completed.');
-        process.exit();
+        console.error('Unhandled error in main:', error);
+        process.exit(1);  // Exit with error code
     }
 }
 
-main().catch(error => console.error('Unhandled error in main:', error));
+main().catch(error => {
+    console.error('Unhandled error in main:', error);
+    process.exit(1);  // Exit with error code
+});
